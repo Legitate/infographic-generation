@@ -3,7 +3,7 @@
     "name": "Infographic Generator for YouTube",
     "version": "1.0",
     "description": "Generate infographics from YouTube videos using NotebookLM.",
-    "homepage_url": "https://github.com/Legitate/serverless-extension",
+    "homepage_url": "https://github.com/Legitate/infographic-generation",
     "permissions": [
         "activeTab",
         "scripting",
@@ -21,7 +21,6 @@
         "service_worker": "background.js"
     },
     "action": {
-        "default_popup": "popup.html",
         "default_icon": {
             "16": "images/icon16.png",
             "48": "images/icon48.png",

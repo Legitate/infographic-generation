@@ -552,7 +552,7 @@ function getOrCreateUI() {
         addToQueueBtn.className = 'altrosyn-btn altrosyn-btn-secondary';
         addToQueueBtn.textContent = 'Add to Queue';
         addToQueueBtn.onclick = handleAddToQueue;
-        interactionContainer.appendChild(addToQueueBtn);
+        // interactionContainer.appendChild(addToQueueBtn);
 
         // Queue Container
         const queueContainer = document.createElement('div');
@@ -595,7 +595,7 @@ function getOrCreateUI() {
         queueControls.appendChild(clearQueueBtn);
         queueContainer.appendChild(queueControls);
 
-        interactionContainer.appendChild(queueContainer);
+        // interactionContainer.appendChild(queueContainer);
 
         const img = document.createElement('img');
         img.id = UI_CONTAINER_ID + '-img-preview';

@@ -2,7 +2,7 @@
 
 This Chrome Extension works as a standalone tool to generate infographics from YouTube videos using your active NotebookLM session.
 
-[GitHub Repository](https://github.com/Legitate/serverless-extension)
+[GitHub Repository](https://github.com/Legitate/infographic-generation)
 
 ## Features
 -   **No Background Server**: Logic runs entirely within the browser.
