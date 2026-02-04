@@ -624,8 +624,15 @@ function getOrCreateUI() {
 }
 
 let pollInterval = null;
+let lastContentStatus = null;
+let isWaitingForReveal = false;
 
 function updateUI(status, imageUrl = null, errorMessage = null, title = null) {
+    const oldStatus = lastContentStatus;
+    lastContentStatus = status;
+
+    if (status !== 'COMPLETED') isWaitingForReveal = false;
+
     // --- Polling Safety Mechanism ---
     if (status === 'RUNNING') {
         if (!pollInterval) {
@@ -689,8 +696,32 @@ function updateUI(status, imageUrl = null, errorMessage = null, title = null) {
         statusEl.textContent = 'Generating...';
         statusEl.style.color = '#5f6368';
     } else if (status === 'COMPLETED') {
-        statusEl.textContent = 'Done!';
+        // Delay Logic
+        if (oldStatus === 'RUNNING' && !isWaitingForReveal) {
+            isWaitingForReveal = true;
+            statusEl.textContent = 'Please wait...';
+            statusEl.style.color = '#5f6368';
+
+            // Hide preview if it was somehow visible (though it shouldn't be yet)
+            imgPreview.style.display = 'none';
+            link.style.display = 'none';
+
+            // Ensure button is hidden
+            generateBtn.style.display = 'none';
+
+            setTimeout(() => {
+                isWaitingForReveal = false;
+                // Recursive call to show final state
+                updateUI(status, imageUrl, errorMessage, title);
+            }, 4000);
+            return;
+        }
+
+        if (isWaitingForReveal) return; // Prevent updates during wait
+
+        statusEl.textContent = 'Done';
         statusEl.style.color = '#137333';
+        generateBtn.style.display = 'flex';
     } else if (status === 'FAILED') {
         statusEl.textContent = errorMessage || 'Failed';
         statusEl.style.color = '#d93025';

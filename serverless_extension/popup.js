@@ -38,8 +38,14 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    let lastStatus = null;
+
     function restoreState(state) {
         if (!state) return;
+
+        // Check for transition from RUNNING to COMPLETED
+        const isFreshCompletion = (lastStatus === 'RUNNING' && state.status === 'COMPLETED');
+        lastStatus = state.status;
 
         if (state.status === 'RUNNING') {
             generateBtn.disabled = true;
@@ -50,37 +56,49 @@ document.addEventListener('DOMContentLoaded', () => {
             downloadLink.classList.add('hidden');
             statusMessage.textContent = 'Processing...';
         } else if (state.status === 'COMPLETED') {
-            loadingDiv.classList.add('hidden');
-            statusMessage.textContent = 'Infographic Generated!';
-            infographicImage.src = state.image_url;
-            infographicImage.style.display = 'block';
+            const showResult = () => {
+                loadingDiv.classList.add('hidden');
+                statusMessage.textContent = 'Done';
+                infographicImage.src = state.image_url;
+                infographicImage.style.display = 'block';
 
-            downloadLink.href = state.image_url; // Keep href for right-click/backup
+                downloadLink.href = state.image_url;
 
-            // Remove any old listeners (cloning node is a cheap way to clear listeners)
-            const newLink = downloadLink.cloneNode(true);
-            downloadLink.parentNode.replaceChild(newLink, downloadLink);
-            const finalLink = document.getElementById('download-link');
+                const newLink = downloadLink.cloneNode(true);
+                downloadLink.parentNode.replaceChild(newLink, downloadLink);
+                const finalLink = document.getElementById('download-link');
 
-            finalLink.classList.remove('hidden');
-            finalLink.textContent = "Download Image";
+                finalLink.classList.remove('hidden');
+                finalLink.textContent = "Download Image";
 
-            finalLink.onclick = (e) => {
-                e.preventDefault();
-                let filename = "infographic.png";
-                if (state.title) {
-                    const safeTitle = state.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-                    filename = `${safeTitle}.png`;
-                }
-                chrome.downloads.download({
-                    url: state.image_url,
-                    filename: filename
-                });
+                finalLink.onclick = (e) => {
+                    e.preventDefault();
+                    let filename = "infographic.png";
+                    if (state.title) {
+                        const safeTitle = state.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+                        filename = `${safeTitle}.png`;
+                    }
+                    chrome.downloads.download({
+                        url: state.image_url,
+                        filename: filename
+                    });
+                };
+
+                generateBtn.textContent = 'Generate Again';
+                generateBtn.disabled = false;
+                generateBtn.classList.remove('hidden');
             };
 
-            generateBtn.textContent = 'Generate Again';
-            generateBtn.disabled = false;
-            generateBtn.classList.remove('hidden');
+            if (isFreshCompletion) {
+                loadingDiv.classList.add('hidden');
+                statusMessage.textContent = 'Please wait...';
+                infographicImage.style.display = 'none';
+                generateBtn.classList.add('hidden'); // Ensure button is hidden during wait
+                setTimeout(showResult, 4000);
+            } else {
+                showResult();
+            }
+
         } else if (state.status === 'FAILED') {
             loadingDiv.classList.add('hidden');
             showError(state.error || 'Unknown error.');
@@ -99,12 +117,15 @@ document.addEventListener('DOMContentLoaded', () => {
         downloadLink.classList.add('hidden');
         statusMessage.textContent = 'Processing...';
 
+        // Mark as RUNNING for the transition logic
+        lastStatus = 'RUNNING';
+
         // Send message to background to trigger backend API
         chrome.runtime.sendMessage({ type: 'GENERATE_INFOGRAPHIC', url: url, title: title }, (response) => {
             // Handle response
-            loadingDiv.classList.add('hidden');
 
             if (chrome.runtime.lastError) {
+                loadingDiv.classList.add('hidden');
                 showError('Extension Error: ' + chrome.runtime.lastError.message);
                 generateBtn.disabled = false;
                 generateBtn.classList.remove('hidden');
@@ -112,38 +133,45 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             if (response && response.success) {
-                statusMessage.textContent = 'Infographic Generated!';
-                infographicImage.src = response.imageUrl;
-                infographicImage.style.display = 'block';
+                // Manually trigger the delayed "Please wait" flow since we know we just finished
+                loadingDiv.classList.add('hidden');
+                statusMessage.textContent = 'Please wait...';
 
-                // Update Download Link logic
-                const newLink = downloadLink.cloneNode(true);
-                downloadLink.parentNode.replaceChild(newLink, downloadLink);
-                const finalLink = document.getElementById('download-link');
+                setTimeout(() => {
+                    statusMessage.textContent = 'Done';
+                    infographicImage.src = response.imageUrl;
+                    infographicImage.style.display = 'block';
 
-                finalLink.href = response.imageUrl;
-                finalLink.classList.remove('hidden');
-                finalLink.textContent = "Download Image";
+                    // Update Download Link logic
+                    const newLink = downloadLink.cloneNode(true);
+                    downloadLink.parentNode.replaceChild(newLink, downloadLink);
+                    const finalLink = document.getElementById('download-link');
 
-                finalLink.onclick = (e) => {
-                    e.preventDefault();
-                    let filename = "infographic.png";
-                    if (title) {
-                        const safeTitle = title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-                        filename = `${safeTitle}.png`;
-                    }
-                    chrome.downloads.download({
-                        url: response.imageUrl,
-                        filename: filename
-                    });
-                };
+                    finalLink.href = response.imageUrl;
+                    finalLink.classList.remove('hidden');
+                    finalLink.textContent = "Download Image";
 
-                // Keep button hidden or show "Generate Again"?
-                generateBtn.textContent = 'Generate Again';
-                generateBtn.disabled = false;
-                generateBtn.classList.remove('hidden');
+                    finalLink.onclick = (e) => {
+                        e.preventDefault();
+                        let filename = "infographic.png";
+                        if (title) {
+                            const safeTitle = title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+                            filename = `${safeTitle}.png`;
+                        }
+                        chrome.downloads.download({
+                            url: response.imageUrl,
+                            filename: filename
+                        });
+                    };
+
+                    // Keep button hidden or show "Generate Again"?
+                    generateBtn.textContent = 'Generate Again';
+                    generateBtn.disabled = false;
+                    generateBtn.classList.remove('hidden');
+                }, 4000); // 4 second delay
 
             } else {
+                loadingDiv.classList.add('hidden');
                 showError(response.error || 'Unknown error occurred.');
                 generateBtn.disabled = false;
                 generateBtn.classList.remove('hidden');
