@@ -2,6 +2,10 @@
 
 const UI_CONTAINER_ID = 'altrosyn-infographic-panel';
 
+// Self-Cleanup: Remove existing UI if script is re-injected (fixes "Extension context invalidated")
+const existingUI = document.getElementById(UI_CONTAINER_ID);
+if (existingUI) existingUI.remove();
+
 // Helper to extract video ID
 function extractVideoId(url) {
     try {
@@ -257,6 +261,8 @@ function injectStyles() {
             cursor: not-allowed;
             transform: none;
             box-shadow: none;
+            opacity: 0.7;
+            filter: blur(0.5px);
         }
         #${UI_CONTAINER_ID}.dark-mode .altrosyn-btn:disabled {
             background: #374151;
@@ -552,7 +558,7 @@ function getOrCreateUI() {
         addToQueueBtn.className = 'altrosyn-btn altrosyn-btn-secondary';
         addToQueueBtn.textContent = 'Add to Queue';
         addToQueueBtn.onclick = handleAddToQueue;
-        // interactionContainer.appendChild(addToQueueBtn);
+        interactionContainer.appendChild(addToQueueBtn);
 
         // Queue Container
         const queueContainer = document.createElement('div');
@@ -595,7 +601,7 @@ function getOrCreateUI() {
         queueControls.appendChild(clearQueueBtn);
         queueContainer.appendChild(queueControls);
 
-        // interactionContainer.appendChild(queueContainer);
+        interactionContainer.appendChild(queueContainer);
 
         const img = document.createElement('img');
         img.id = UI_CONTAINER_ID + '-img-preview';
@@ -736,39 +742,49 @@ function updateUI(status, imageUrl = null, errorMessage = null, title = null) {
     // Button State
     const currentVideoId = extractVideoId(window.location.href);
 
-    if (status === 'RUNNING') {
-        generateBtn.textContent = 'Creating Magic...';
-        generateBtn.disabled = true;
-    } else if (status === 'COMPLETED') {
-        if (!currentVideoId) {
-            // On Home Page, showing persistent result
-            generateBtn.textContent = 'Open Video to Generate New';
-            generateBtn.className = 'altrosyn-btn altrosyn-btn-secondary';
-            generateBtn.disabled = true;
-        } else {
-            // On a Video Page
-            generateBtn.textContent = 'Generate New';
-            generateBtn.className = 'altrosyn-btn altrosyn-btn-secondary';
-            generateBtn.disabled = false;
-            generateBtn.onclick = resetToInitialState;
+    // Fetch queue state for main button lock AND detailed status text
+    chrome.storage.local.get(['isQueueRunning', 'queueStatusText'], (qResult) => {
+        const isQueueRunning = qResult.isQueueRunning || false;
+        const queueStatusText = qResult.queueStatusText || 'Queue Processing...';
+
+        // Update Status Text for Queue if running
+        if (isQueueRunning && status === 'RUNNING') {
+            statusEl.textContent = queueStatusText;
         }
-    } else if (status === 'INVALID_CONTEXT') {
-        generateBtn.textContent = 'Open a Video First';
-        generateBtn.className = 'altrosyn-btn';
-        generateBtn.disabled = true;
-    } else if (status === 'AUTH_REQUIRED') {
-        generateBtn.textContent = 'Retry Generation';
-        generateBtn.className = 'altrosyn-btn';
-        generateBtn.disabled = false;
-        generateBtn.onclick = startGeneration;
-    } else {
-        generateBtn.textContent = 'Generate Infographic';
-        generateBtn.className = 'altrosyn-btn';
-        generateBtn.disabled = false;
-        generateBtn.className = 'altrosyn-btn';
-        generateBtn.disabled = false;
-        generateBtn.onclick = startGeneration;
-    }
+
+        if (status === 'RUNNING' || isQueueRunning) {
+            generateBtn.textContent = isQueueRunning ? 'Queue Processing...' : 'Creating Magic...';
+            generateBtn.disabled = true;
+        } else if (status === 'COMPLETED') {
+            if (!currentVideoId) {
+                // On Home Page, showing persistent result
+                generateBtn.textContent = 'Open Video to Generate New';
+                generateBtn.className = 'altrosyn-btn altrosyn-btn-secondary';
+                generateBtn.disabled = true;
+            } else {
+                // On a Video Page
+                generateBtn.textContent = 'Generate New';
+                generateBtn.className = 'altrosyn-btn altrosyn-btn-secondary';
+                generateBtn.disabled = false;
+                generateBtn.onclick = resetToInitialState;
+            }
+        } else if (status === 'INVALID_CONTEXT') {
+            generateBtn.textContent = 'Open a Video First';
+            generateBtn.className = 'altrosyn-btn';
+            generateBtn.disabled = true;
+        } else if (status === 'AUTH_REQUIRED') {
+            generateBtn.textContent = 'Retry Generation';
+            generateBtn.className = 'altrosyn-btn';
+            generateBtn.disabled = false;
+            generateBtn.onclick = startGeneration;
+        } else {
+            // IDLE / PRE-GENERATION STATE
+            generateBtn.textContent = 'Generate Infographic';
+            generateBtn.className = 'altrosyn-btn';
+            generateBtn.disabled = false;
+            generateBtn.onclick = startGeneration;
+        }
+    });
 
     // Update Queue UI
     // Update Queue UI
@@ -913,8 +929,10 @@ function startGeneration() {
 // --- QUEUE LOGIC ---
 
 function updateQueueUI(currentStatus = 'IDLE') {
-    chrome.storage.local.get(['infographicQueue'], (result) => {
+    chrome.storage.local.get(['infographicQueue', 'isQueueRunning'], (result) => {
         const queue = result.infographicQueue || [];
+        const isQueueRunning = result.isQueueRunning || false;
+
         const countEl = document.getElementById(UI_CONTAINER_ID + '-queue-count');
         const listEl = document.getElementById(UI_CONTAINER_ID + '-queue-list');
         const sectionEl = document.getElementById(UI_CONTAINER_ID + '-queue-section');
@@ -931,8 +949,8 @@ function updateQueueUI(currentStatus = 'IDLE') {
         // Check if current video is in queue
         const currentId = extractVideoId(window.location.href);
 
-        // Helper to disable buttons
-        const isRunning = (currentStatus === 'RUNNING');
+        // Helper to disable buttons - GLOBAL LOCK if queue is running
+        const isRunning = (currentStatus === 'RUNNING' || isQueueRunning);
 
         if (addBtn) {
             if (isRunning) {
@@ -977,8 +995,39 @@ function updateQueueUI(currentStatus = 'IDLE') {
                 queue.forEach((item, index) => {
                     const row = document.createElement('div');
                     row.className = 'altrosyn-queue-item';
-                    row.innerHTML = `<span>${item.title}</span>`;
 
+                    // Title
+                    const titleSpan = document.createElement('span');
+                    titleSpan.textContent = item.title;
+                    row.appendChild(titleSpan);
+
+                    // Actions Container
+                    const actionsDiv = document.createElement('div');
+                    actionsDiv.style.display = 'flex';
+                    actionsDiv.style.alignItems = 'center';
+                    actionsDiv.style.gap = '8px';
+
+                    // Download Link (if completed)
+                    if (item.imageUrl) {
+                        const dlLink = document.createElement('a');
+                        dlLink.href = item.imageUrl;
+                        dlLink.download = "infographic.png";
+                        dlLink.target = "_blank";
+                        dlLink.title = "Download Infographic";
+                        dlLink.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:#10b981;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>`;
+                        dlLink.onclick = (e) => {
+                            e.stopPropagation();
+                            // Use extension downloader for better filename control if possible
+                            chrome.runtime.sendMessage({
+                                type: 'DOWNLOAD_IMAGE',
+                                url: item.imageUrl,
+                                filename: `${item.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.png`
+                            });
+                        };
+                        actionsDiv.appendChild(dlLink);
+                    }
+
+                    // Remove Button
                     const removeBtn = document.createElement('div');
                     removeBtn.className = 'altrosyn-queue-remove';
                     removeBtn.textContent = '×';
@@ -992,7 +1041,9 @@ function updateQueueUI(currentStatus = 'IDLE') {
                             removeFromQueue(index);
                         };
                     }
-                    row.appendChild(removeBtn);
+                    actionsDiv.appendChild(removeBtn);
+
+                    row.appendChild(actionsDiv);
                     listEl.appendChild(row);
                 });
             }
@@ -1058,25 +1109,32 @@ function startQueueGeneration() {
 
 function resetToInitialState() {
     const currentVideoId = extractVideoId(window.location.href);
-    if (!currentVideoId) return;
 
-    // Clear state for this video AND claim focus to break any sticky state from other videos
     chrome.storage.local.get(['infographicStates'], (result) => {
         const states = result.infographicStates || {};
 
-        // Remove existing state for this video
-        if (states[currentVideoId]) {
-            delete states[currentVideoId];
+        if (currentVideoId) {
+            // Remove existing state for this video
+            if (states[currentVideoId]) {
+                delete states[currentVideoId];
+            }
+            // Update storage: 
+            // 1. Save cleaned states
+            // 2. Set lastActiveVideoId to current (which is now empty/IDLE) to focus here
+            chrome.storage.local.set({
+                infographicStates: states,
+                lastActiveVideoId: currentVideoId
+            }, () => {
+                restoreStateForCurrentVideo();
+            });
+        } else {
+            // On Home Page or other non-video page
+            // Just clear the global sticky lock so UI resets to IDLE (or "Invalid Context")
+            chrome.storage.local.set({
+                lastActiveVideoId: null
+            }, () => {
+                restoreStateForCurrentVideo();
+            });
         }
-
-        // Update storage: 
-        // 1. Save cleaned states
-        // 2. Set lastActiveVideoId to current, ensuring we look at THIS video (which is now empty/IDLE)
-        chrome.storage.local.set({
-            infographicStates: states,
-            lastActiveVideoId: currentVideoId
-        }, () => {
-            restoreStateForCurrentVideo(); // Should now resolve to IDLE
-        });
     });
 }

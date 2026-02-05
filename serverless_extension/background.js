@@ -173,83 +173,141 @@ function getUserFriendlyError(rawError) {
 async function runQueueGenerationFlow(queue) {
     if (!queue || queue.length === 0) return;
 
-    // Use the first video ID as the "primary" key for state updates to keep UI in sync?
-    // Or maybe we don't update individual video states, but just broadcast global status?
-    // Let's use the first video's ID for state tracking for now, or maybe a special "QUEUE" ID?
-    // Since UI listens to restoration, let's update ALL queued items to RUNNING state so if user navigates to them, they see it?
+    // Broadcast global RUNNING state
+    broadcastStatus(null, "RUNNING");
 
-    const primaryVideoId = queue[0].videoId;
-    const title = `Queue Batch (${queue.length} videos)`;
+    // SET GLOBAL QUEUE LOCK
+    await chrome.storage.local.set({ isQueueRunning: true });
 
-    // 1. Set State for all items AND set Global Active ID to lock UI
-    await chrome.storage.local.set({ lastActiveVideoId: primaryVideoId });
-
-    for (const item of queue) {
-        await updateState(item.videoId, { status: 'RUNNING', operation_id: Date.now(), title: item.title });
-        // We can't easily broadcast to specific tabs unless we track them, but broadcastStatus does wildcards.
-    }
-    broadcastStatus(null, "RUNNING"); // Broadcast globally
+    const total = queue.length;
+    // We'll use the first video to "lock" the UI initially if needed, 
+    // but the loop will update it.
 
     try {
         const client = new NotebookLMClient();
         await client.init();
 
-        console.log("Creating Notebook for Queue...");
-        const notebookId = await client.createNotebook("Infographic Queue Batch");
-        console.log("Notebook ID:", notebookId);
-
-        // 3. Add Sources Sequentially
-        let lastSourceId = null;
-        for (let i = 0; i < queue.length; i++) {
+        for (let i = 0; i < total; i++) {
             const item = queue[i];
-            console.log(`Adding source ${i + 1}/${queue.length}: ${item.url}`);
+            const currentCount = i + 1;
+            const safeTitle = item.title || "Untitled Video";
+            const progressMsg = `Processing ${currentCount}/${total}: ${safeTitle.substring(0, 20)}...`;
 
-            // Broadcast progress?
-            // updateState(primaryVideoId, { status: 'RUNNING', message: `Adding source ${i+1}/${queue.length}` });
+            console.log(`[Queue] Starting item ${currentCount}/${total}: ${safeTitle}`);
 
-            const sourceData = await client.addSource(notebookId, item.url);
-            lastSourceId = sourceData.source_id;
+            // 1. LOCK UI & SET MESSAGE
+            await chrome.storage.local.set({
+                lastActiveVideoId: item.videoId,
+                queueStatusText: progressMsg
+            });
 
-            // Brief pause between adds to be safe
-            await new Promise(r => setTimeout(r, 2000));
+            // 2. Update individual state to RUNNING
+            await updateState(item.videoId, {
+                status: 'RUNNING',
+                operation_id: Date.now(),
+                title: safeTitle
+            });
+
+            // Broadcast progress
+            const tabs = await chrome.tabs.query({ url: "*://*.youtube.com/*" });
+            for (const tab of tabs) {
+                chrome.tabs.sendMessage(tab.id, {
+                    type: 'INFOGRAPHIC_UPDATE',
+                    status: 'RUNNING',
+                    queueProgress: `Processing ${currentCount} of ${total}`
+                }).catch(() => { });
+            }
+
+            try {
+                // -- GENERATION STEPS --
+                const notebookName = `Infographic: ${safeTitle}`;
+                console.log(`[Queue] Creating Notebook: ${notebookName}`);
+                const notebookId = await client.createNotebook(notebookName);
+
+                console.log(`[Queue] Adding Source: ${item.url}`);
+                const sourceData = await client.addSource(notebookId, item.url);
+                const sourceId = sourceData.source_id;
+
+                // Wait for ingestion
+                await new Promise(r => setTimeout(r, 5000));
+
+                console.log(`[Queue] Running Tool...`);
+                const opId = await client.runInfographicTool(notebookId, sourceId);
+
+                if (!opId) {
+                    // Check if this was actually a limit issue that didn't throw yet
+                    // If opId is null, it's virtually always a limit or quota issue
+                    throw new Error("Daily limit exceeded");
+                }
+
+                console.log(`[Queue] Polling...`);
+                const imageUrl = await client.waitForInfographic(notebookId, opId);
+                console.log(`[Queue] Success for ${safeTitle}: ${imageUrl}`);
+
+                // Success State!
+                await updateState(item.videoId, {
+                    status: 'COMPLETED',
+                    image_url: imageUrl,
+                    title: safeTitle
+                });
+
+                // UPDATE QUEUE OBJECT WITH RESULT
+                const qResult = await chrome.storage.local.get(['infographicQueue']);
+                const currentQueue = qResult.infographicQueue || [];
+                const qItemIndex = currentQueue.findIndex(q => q.videoId === item.videoId);
+                if (qItemIndex !== -1) {
+                    currentQueue[qItemIndex].imageUrl = imageUrl;
+                    currentQueue[qItemIndex].status = 'COMPLETED';
+                    await chrome.storage.local.set({ infographicQueue: currentQueue });
+                }
+
+                broadcastStatus(item.url, "COMPLETED", { image_url: imageUrl });
+
+            } catch (itemError) {
+                console.error(`[Queue] Failed item ${safeTitle}:`, itemError);
+
+                // --- ERROR HANDLING AND LOOP CONTROL ---
+                const friendly = getUserFriendlyError(itemError.message);
+
+                if (friendly.type === 'AUTH') {
+                    // CRITICAL: Stop Queue
+                    console.log("[Queue] Auth Error - STOPPING QUEUE");
+                    await updateState(item.videoId, { status: 'AUTH_REQUIRED', error: friendly.message });
+                    broadcastStatus(item.url, "AUTH_EXPIRED");
+                    break; // STOP LOOP
+                }
+                else if (friendly.type === 'LIMIT') {
+                    // CRITICAL: Stop Queue
+                    console.log("[Queue] Limit Exceeded - STOPPING QUEUE");
+                    await updateState(item.videoId, { status: 'LIMIT_EXCEEDED', error: friendly.message });
+                    broadcastStatus(item.url, "LIMIT_EXCEEDED", { error: friendly.message });
+                    break; // STOP LOOP
+                }
+                else {
+                    // Non-Critical (Network, Timeout, Bad Video): Fail this one, Continue to next
+                    console.log("[Queue] Non-critical error - Continuing queue");
+                    await updateState(item.videoId, { status: 'FAILED', error: friendly.message });
+                    broadcastStatus(item.url, "FAILED", { error: friendly.message });
+                }
+            }
+
+            // Small delay between items to be nice to the server
+            if (i < total - 1) {
+                await new Promise(r => setTimeout(r, 3000));
+            }
         }
 
-        // Wait for ingestion
-        await new Promise(r => setTimeout(r, 5000));
+        // UNLOCK GLOBAL QUEUE
+        await chrome.storage.local.set({ isQueueRunning: false });
 
-        // 4. Run Infographic Tool (Using the last source ID is usually fine, or maybe we don't strictly need it if context is whole notebook)
-        // NotebookLM tools usually work on "selected sources". Does API auto-select all? 
-        // Usually creating a new notebook enables all current sources.
-
-        console.log("Running Infographic Tool on Batch...");
-        const opId = await client.runInfographicTool(notebookId, lastSourceId);
-
-        if (!opId) {
-            throw new Error("Daily limit exceeded or tool failed");
-        }
-
-        console.log("Polling for result...");
-        const imageUrl = await client.waitForInfographic(notebookId, opId);
-        console.log("Success! Image:", imageUrl);
-
-        // Update ALL queued items to COMPLETED
-        for (const item of queue) {
-            await updateState(item.videoId, { status: 'COMPLETED', image_url: imageUrl, title: item.title });
-        }
-        broadcastStatus(null, "COMPLETED", { image_url: imageUrl });
-
-        // Also clear queue? Maybe content.js should handle that upon receiving COMPLETED?
-        // Let's leave it to user to clear or content script to auto-clear.
-
-        return { success: true, imageUrl: imageUrl };
+        return { success: true };
 
     } catch (e) {
-        console.error("Queue Generation Failed:", e);
-        const errMsg = e.message || "Unknown error";
-        for (const item of queue) {
-            await updateState(item.videoId, { status: 'FAILED', error: errMsg });
-        }
-        broadcastStatus(null, "FAILED", { error: errMsg });
+        // Top-level init/fatal errors
+        console.error("Queue Batch Flow Fatal Error:", e);
+        await chrome.storage.local.set({ isQueueRunning: false });
+        // We might not know which video failed if init failed, so broadcast global fail
+        broadcastStatus(null, "FAILED", { error: e.message });
         throw e;
     }
 }
