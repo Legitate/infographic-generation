@@ -66,29 +66,31 @@ function injectStyles() {
     const style = document.createElement('style');
     style.id = 'altrosyn-styles';
     style.textContent = `
+        :root {
+            --altrosyn-bg-color: rgba(255, 255, 255, 0.85);
+            --altrosyn-bg-minimized: rgba(255, 255, 255, 0.9);
+            --altrosyn-text-main: #1f2937;
+            --altrosyn-text-secondary: #6b7280;
+            --altrosyn-border-color: rgba(255, 255, 255, 0.8);
+            --altrosyn-shadow-color: rgba(0, 0, 0, 0.12);
+            --altrosyn-icon-color: #2563eb;
+            --altrosyn-btn-sec-bg: rgba(255, 255, 255, 0.6);
+            --altrosyn-btn-sec-text: #2563eb;
+            --altrosyn-btn-sec-border: rgba(37, 99, 235, 0.2);
+            --altrosyn-queue-header-color: #374151;
+            --altrosyn-queue-item-bg: rgba(255, 255, 255, 0.6);
+            --altrosyn-queue-item-text: #4b5563;
+        }
+
         #${UI_CONTAINER_ID} {
-            --bg-color: rgba(255, 255, 255, 0.85);
-            --bg-minimized: rgba(255, 255, 255, 0.9);
-            --text-main: #1f2937;
-            --text-secondary: #6b7280;
-            --border-color: rgba(255, 255, 255, 0.8);
-            --shadow-color: rgba(0, 0, 0, 0.12);
-            --icon-color: #2563eb;
-            --btn-sec-bg: rgba(255, 255, 255, 0.6);
-            --btn-sec-text: #2563eb;
-            --btn-sec-border: rgba(37, 99, 235, 0.2);
-            --queue-header-color: #374151;
-            --queue-item-bg: rgba(255, 255, 255, 0.6);
-            --queue-item-text: #4b5563;
-            
             position: fixed;
             bottom: 24px;
             right: 24px;
             width: 340px;
-            background: var(--bg-color);
+            background: var(--altrosyn-bg-color);
             backdrop-filter: blur(20px) saturate(180%);
             -webkit-backdrop-filter: blur(20px) saturate(180%);
-            box-shadow: 0 12px 40px var(--shadow-color), 0 1px 1px rgba(0,0,0,0.05);
+            box-shadow: 0 12px 40px var(--altrosyn-shadow-color), 0 1px 1px rgba(0,0,0,0.05);
             border-radius: 24px;
             padding: 24px;
             z-index: 2147483647;
@@ -96,24 +98,28 @@ function injectStyles() {
             display: none;
             flex-direction: column;
             gap: 18px;
-            border: 1px solid var(--border-color);
+            border: 1px solid var(--altrosyn-border-color);
             transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
-            color: var(--text-main);
+            color: var(--altrosyn-text-main);
         }
         #${UI_CONTAINER_ID}.dark-mode {
-            --bg-color: rgba(20, 20, 20, 0.85);
-            --bg-minimized: rgba(30, 30, 30, 0.9);
-            --text-main: #f3f4f6;
-            --text-secondary: #d1d5db;
-            --border-color: rgba(255, 255, 255, 0.1);
-            --shadow-color: rgba(0, 0, 0, 0.5);
-            --icon-color: #60a5fa;
-            --btn-sec-bg: rgba(255, 255, 255, 0.05);
-            --btn-sec-text: #60a5fa;
-            --btn-sec-border: rgba(255, 255, 255, 0.1);
-            --queue-header-color: #e5e7eb;
-            --queue-item-bg: rgba(255, 255, 255, 0.05);
-            --queue-item-text: #d1d5db;
+            /* Variables now handled via class or override below if needed */
+        }
+        /* Dark Theme Overrides */
+        body.altrosyn-dark-theme, #${UI_CONTAINER_ID}.dark-mode {
+            --altrosyn-bg-color: rgba(20, 20, 20, 0.85);
+            --altrosyn-bg-minimized: rgba(30, 30, 30, 0.9);
+            --altrosyn-text-main: #f3f4f6;
+            --altrosyn-text-secondary: #d1d5db;
+            --altrosyn-border-color: rgba(255, 255, 255, 0.1);
+            --altrosyn-shadow-color: rgba(0, 0, 0, 0.5);
+            --altrosyn-icon-color: #60a5fa;
+            --altrosyn-btn-sec-bg: rgba(255, 255, 255, 0.05);
+            --altrosyn-btn-sec-text: #60a5fa;
+            --altrosyn-btn-sec-border: rgba(255, 255, 255, 0.1);
+            --altrosyn-queue-header-color: #e5e7eb;
+            --altrosyn-queue-item-bg: rgba(255, 255, 255, 0.05);
+            --altrosyn-queue-item-text: #d1d5db;
         }
         #${UI_CONTAINER_ID}.minimized {
             width: 56px;
@@ -122,11 +128,11 @@ function injectStyles() {
             border-radius: 28px;
             cursor: pointer;
             overflow: hidden;
-            background: var(--bg-minimized);
+            background: var(--altrosyn-bg-minimized);
             box-shadow: 0 8px 24px rgba(0,0,0,0.15);
             justify-content: center;
             align-items: center;
-            border: 1px solid var(--border-color);
+            border: 1px solid var(--altrosyn-border-color);
         }
         #${UI_CONTAINER_ID}.minimized:hover {
             transform: scale(1.08);
@@ -145,7 +151,7 @@ function injectStyles() {
         .altrosyn-title {
             font-size: 17px;
             font-weight: 700;
-            color: var(--text-main);
+            color: var(--altrosyn-text-main);
             display: flex;
             align-items: center;
             gap: 10px;
@@ -154,7 +160,7 @@ function injectStyles() {
         .altrosyn-title svg {
             width: 22px;
             height: 22px;
-            color: var(--icon-color);
+            color: var(--altrosyn-icon-color);
             filter: drop-shadow(0 2px 4px rgba(37,99,235,0.2));
         }
         .altrosyn-min-btn {
@@ -162,7 +168,7 @@ function injectStyles() {
             border: none;
             cursor: pointer;
             padding: 6px;
-            color: var(--text-secondary);
+            color: var(--altrosyn-text-secondary);
             border-radius: 50%;
             display: flex;
             align-items: center;
@@ -171,7 +177,7 @@ function injectStyles() {
         }
         .altrosyn-min-btn:hover {
             background: rgba(125,125,125,0.1);
-            color: var(--text-main);
+            color: var(--altrosyn-text-main);
         }
 
         /* Help Tooltip */
@@ -181,13 +187,13 @@ function injectStyles() {
         }
         .altrosyn-help-icon {
             cursor: pointer;
-            color: var(--text-secondary);
+            color: var(--altrosyn-text-secondary);
             width: 18px;
             height: 18px;
             transition: color 0.2s;
         }
         .altrosyn-help-icon:hover {
-            color: var(--icon-color);
+            color: var(--altrosyn-icon-color);
         }
         .altrosyn-tooltip {
             visibility: hidden;
@@ -285,7 +291,7 @@ function injectStyles() {
         .altrosyn-status {
             font-size: 14px;
             text-align: center;
-            color: var(--text-secondary);
+            color: var(--altrosyn-text-secondary);
             margin: 2px 0;
             font-weight: 500;
         }
@@ -293,7 +299,7 @@ function injectStyles() {
             width: 100%;
             height: auto;
             border-radius: 12px;
-            border: 1px solid var(--border-color);
+            border: 1px solid var(--altrosyn-border-color);
             cursor: pointer;
             transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
             display: none;
@@ -306,7 +312,7 @@ function injectStyles() {
         .altrosyn-link {
             display: block;
             text-align: center;
-            color: var(--icon-color);
+            color: var(--altrosyn-icon-color);
             text-decoration: none;
             padding: 10px;
             font-size: 13px;
@@ -320,7 +326,7 @@ function injectStyles() {
 
         /* Queue UI */
         .altrosyn-queue-container {
-            border-top: 1px solid var(--border-color);
+            border-top: 1px solid var(--altrosyn-border-color);
             padding-top: 16px;
             margin-top: 8px;
             display: flex;
@@ -333,12 +339,12 @@ function injectStyles() {
             align-items: center;
             font-size: 13px;
             font-weight: 600;
-            color: var(--queue-header-color);
+            color: var(--altrosyn-queue-header-color);
             cursor: pointer;
             user-select: none;
         }
         .altrosyn-queue-header:hover {
-            color: var(--text-main);
+            color: var(--altrosyn-text-main);
         }
         .altrosyn-queue-count {
             background: #eff6ff;
@@ -383,10 +389,10 @@ function injectStyles() {
             align-items: center;
             font-size: 12px;
             padding: 8px 10px;
-            background: var(--queue-item-bg);
-            border: 1px solid var(--border-color);
+            background: var(--altrosyn-queue-item-bg);
+            border: 1px solid var(--altrosyn-border-color);
             border-radius: 8px;
-            color: var(--queue-item-text);
+            color: var(--altrosyn-queue-item-text);
         }
         .altrosyn-queue-item span {
             overflow: hidden;
@@ -413,7 +419,7 @@ function injectStyles() {
             display: none;
             width: 28px;
             height: 28px;
-            color: var(--icon-color);
+            color: var(--altrosyn-icon-color);
             filter: drop-shadow(0 2px 4px rgba(37,99,235,0.25));
         }
         #${UI_CONTAINER_ID}.minimized .minimized-icon {
@@ -429,7 +435,7 @@ function injectStyles() {
             height: 16px;
             border: 2px solid rgba(37, 99, 235, 0.3);
             border-radius: 50%;
-            border-top-color: var(--icon-color);
+            border-top-color: var(--altrosyn-icon-color);
             animation: altrosyn-spin 1s ease-in-out infinite;
         }
         @keyframes altrosyn-spin {
@@ -450,6 +456,166 @@ function injectStyles() {
         .altrosyn-queue-error:hover + .altrosyn-tooltip {
             visibility: visible;
             opacity: 1;
+        }
+
+        /* --- GALLERY UI --- */
+        #altrosyn-gallery-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(5px);
+            z-index: 2147483648; /* Higher than panel */
+            display: none;
+            justify-content: center; /* Center horizontally if we wanted, but we want left side */
+            align-items: center;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+        #altrosyn-gallery-overlay.visible {
+            opacity: 1;
+        }
+
+        #altrosyn-gallery-container {
+            position: fixed;
+            top: 24px;
+            left: 24px;
+            bottom: 24px;
+            width: 80vw; /* Responsive width */
+            max-width: 900px;
+            background: var(--altrosyn-bg-color);
+            border-radius: 24px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            transform: translateX(-50px);
+            opacity: 0;
+            transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            border: 1px solid var(--altrosyn-border-color);
+        }
+        #altrosyn-gallery-overlay.visible #altrosyn-gallery-container {
+            transform: translateX(0);
+            opacity: 1;
+        }
+
+        .altrosyn-gallery-header {
+            padding: 20px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--altrosyn-border-color);
+        }
+        .altrosyn-gallery-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--altrosyn-text-main);
+        }
+        .altrosyn-gallery-close {
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            color: var(--altrosyn-text-secondary);
+            padding: 8px;
+            border-radius: 50%;
+            transition: background 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .altrosyn-gallery-close:hover {
+            background: rgba(0,0,0,0.05);
+            color: var(--altrosyn-text-main);
+        }
+
+        .altrosyn-gallery-content {
+            flex: 1;
+            position: relative;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: rgba(0,0,0,0.02);
+            padding: 24px;
+            overflow: hidden;
+        }
+        
+        .altrosyn-gallery-image-wrapper {
+            position: relative;
+            max-width: 100%;
+            max-height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .altrosyn-gallery-img {
+            max-width: 100%;
+            max-height: calc(100vh - 200px);
+            object-fit: contain;
+            border-radius: 8px;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+        }
+
+        .altrosyn-gallery-nav-btn {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            background: rgba(255, 255, 255, 0.8);
+            border: 1px solid rgba(0,0,0,0.1);
+            border-radius: 50%;
+            width: 48px;
+            height: 48px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            color: #333;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            transition: all 0.2s;
+            z-index: 10;
+        }
+        .altrosyn-gallery-nav-btn:hover {
+            background: white;
+            transform: translateY(-50%) scale(1.1);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+        }
+        .altrosyn-gallery-nav-btn:disabled {
+            opacity: 0.3;
+            cursor: default;
+            transform: translateY(-50%);
+        }
+        .altrosyn-gallery-prev { left: 24px; }
+        .altrosyn-gallery-next { right: 24px; }
+        #${UI_CONTAINER_ID}.dark-mode .altrosyn-gallery-nav-btn {
+            background: rgba(40, 40, 40, 0.8);
+            color: #fff;
+            border-color: rgba(255,255,255,0.1);
+        }
+        #${UI_CONTAINER_ID}.dark-mode .altrosyn-gallery-nav-btn:hover {
+            background: rgba(50, 50, 50, 1);
+        }
+
+        .altrosyn-gallery-footer {
+            padding: 16px 24px;
+            border-top: 1px solid var(--altrosyn-border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .altrosyn-gallery-caption {
+            font-size: 14px;
+            color: var(--altrosyn-text-secondary);
+            font-weight: 500;
+            max-width: 60%;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .altrosyn-gallery-actions {
+            display: flex;
+            gap: 12px;
         }
     `;
     document.head.appendChild(style);
@@ -536,6 +702,7 @@ function getOrCreateUI() {
                 chrome.storage.local.set({ minimized: true });
             };
         }
+
 
         // Status
         const statusEl = document.createElement('div');
@@ -645,6 +812,60 @@ function getOrCreateUI() {
         link.target = '_blank';
         link.style.display = 'none';
         interactionContainer.appendChild(link);
+
+        // --- Gallery UI Injection ---
+        const galleryOverlay = document.createElement('div');
+        galleryOverlay.id = 'altrosyn-gallery-overlay';
+        galleryOverlay.innerHTML = `
+            <div id="altrosyn-gallery-container">
+                <div class="altrosyn-gallery-header">
+                    <div class="altrosyn-gallery-title">Recent Infographics (48h)</div>
+                    <button class="altrosyn-gallery-close" title="Close">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                    </button>
+                </div>
+                <div class="altrosyn-gallery-content">
+                    <button class="altrosyn-gallery-nav-btn altrosyn-gallery-prev" title="Previous">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                    </button>
+                    <div class="altrosyn-gallery-image-wrapper">
+                        <img id="altrosyn-gallery-img" class="altrosyn-gallery-img" src="" alt="Infographic">
+                    </div>
+                    <button class="altrosyn-gallery-nav-btn altrosyn-gallery-next" title="Next">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                    </button>
+                </div>
+                <div class="altrosyn-gallery-footer">
+                    <div class="altrosyn-gallery-caption" id="altrosyn-gallery-caption">Title of the video</div>
+                    <div class="altrosyn-gallery-actions">
+                         <span id="altrosyn-gallery-counter" style="color:var(--text-secondary); font-size:13px; display:flex; align-items:center; margin-right:12px;">1 / 5</span>
+                         <button class="altrosyn-btn" id="altrosyn-gallery-download" style="width:auto; padding: 8px 16px; font-size:13px;">
+                            Download
+                         </button>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(galleryOverlay);
+
+        // Bind Gallery Events
+        galleryOverlay.querySelector('.altrosyn-gallery-close').onclick = closeGallery;
+        galleryOverlay.onclick = (e) => {
+            if (e.target === galleryOverlay) closeGallery();
+        };
+        galleryOverlay.querySelector('.altrosyn-gallery-prev').onclick = prevGalleryImage;
+        galleryOverlay.querySelector('.altrosyn-gallery-next').onclick = nextGalleryImage;
+        galleryOverlay.querySelector('#altrosyn-gallery-download').onclick = downloadGalleryImage;
+
+        // Keydown listener for gallery (only active when visible)
+        document.addEventListener('keydown', (e) => {
+            const overlay = document.getElementById('altrosyn-gallery-overlay');
+            if (overlay && overlay.style.display === 'flex') {
+                if (e.key === 'Escape') closeGallery();
+                if (e.key === 'ArrowLeft') prevGalleryImage();
+                if (e.key === 'ArrowRight') nextGalleryImage();
+            }
+        });
         // Restore minimized state & Theme
         chrome.storage.local.get(['minimized', 'theme'], (result) => {
             if (result.minimized) {
@@ -846,12 +1067,15 @@ function updateUI(status, imageUrl = null, errorMessage = null, title = null) {
     if (status === 'COMPLETED' && imageUrl) {
         imgPreview.src = imageUrl;
         imgPreview.style.display = 'block';
-        imgPreview.onclick = triggerDownload; // Now triggers specific filename download
+        imgPreview.onclick = () => openGallery(imageUrl); // Pass current image to open gallery focused on it
 
-        link.href = imageUrl; // fallback
-        link.textContent = "Download Image";
+        link.href = "#"; // Prevent default link behavior
+        link.textContent = "View in Gallery";
         link.style.display = 'block';
-        link.onclick = triggerDownload;
+        link.onclick = (e) => {
+            e.preventDefault();
+            openGallery(imageUrl);
+        };
     } else {
         imgPreview.style.display = 'none';
         link.style.display = 'none';
@@ -1196,5 +1420,95 @@ function resetToInitialState() {
                 restoreStateForCurrentVideo();
             });
         }
+    });
+}
+
+// --- GALLERY LOGIC ---
+
+let galleryImages = [];
+let currentGalleryIndex = 0;
+
+function openGallery(preferredImageUrl = null) {
+    chrome.storage.local.get(['infographicStates'], (result) => {
+        const states = result.infographicStates || {};
+
+        // Filter COMPLETED items and sort by time (newest first)
+        // Note: existing items might not have completedAt, but we can treat them as older or newer depending on needs.
+        // Let's sort by completedAt desc, treating undefined as oldest.
+        galleryImages = Object.values(states)
+            .filter(s => s.status === 'COMPLETED' && s.image_url)
+            .sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0));
+
+        if (galleryImages.length === 0) return; // Nothing to show
+
+        // Find index of preferred image
+        if (preferredImageUrl) {
+            const idx = galleryImages.findIndex(img => img.image_url === preferredImageUrl);
+            currentGalleryIndex = idx !== -1 ? idx : 0;
+        } else {
+            currentGalleryIndex = 0;
+        }
+
+        updateGalleryContent();
+
+        const overlay = document.getElementById('altrosyn-gallery-overlay');
+        overlay.style.display = 'flex';
+        // Trigger reflow
+        overlay.offsetHeight;
+        overlay.classList.add('visible');
+    });
+}
+
+function closeGallery() {
+    const overlay = document.getElementById('altrosyn-gallery-overlay');
+    overlay.classList.remove('visible');
+    setTimeout(() => {
+        overlay.style.display = 'none';
+    }, 300);
+}
+
+function updateGalleryContent() {
+    const item = galleryImages[currentGalleryIndex];
+    if (!item) return;
+
+    const imgEl = document.getElementById('altrosyn-gallery-img');
+    const captionEl = document.getElementById('altrosyn-gallery-caption');
+    const counterEl = document.getElementById('altrosyn-gallery-counter');
+    const prevBtn = document.querySelector('.altrosyn-gallery-prev');
+    const nextBtn = document.querySelector('.altrosyn-gallery-next');
+
+    imgEl.src = item.image_url;
+    captionEl.textContent = item.title || "Untitled Infographic";
+    counterEl.textContent = `${currentGalleryIndex + 1} / ${galleryImages.length}`;
+
+    prevBtn.disabled = currentGalleryIndex === 0;
+    nextBtn.disabled = currentGalleryIndex === galleryImages.length - 1;
+}
+
+function prevGalleryImage() {
+    if (currentGalleryIndex > 0) {
+        currentGalleryIndex--;
+        updateGalleryContent();
+    }
+}
+
+function nextGalleryImage() {
+    if (currentGalleryIndex < galleryImages.length - 1) {
+        currentGalleryIndex++;
+        updateGalleryContent();
+    }
+}
+
+function downloadGalleryImage(e) {
+    if (e) e.stopPropagation();
+    const item = galleryImages[currentGalleryIndex];
+    if (!item) return;
+
+    const filename = (item.title ? item.title.replace(/[^a-z0-9]/gi, '_').toLowerCase() : "infographic") + ".png";
+
+    chrome.runtime.sendMessage({
+        type: 'DOWNLOAD_IMAGE',
+        url: item.image_url,
+        filename: filename
     });
 }

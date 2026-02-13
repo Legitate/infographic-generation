@@ -10,7 +10,8 @@
         "storage",
         "cookies",
         "declarativeNetRequest",
-        "downloads"
+        "downloads",
+        "unlimitedStorage"
     ],
     "host_permissions": [
         "*://*.youtube.com/*",

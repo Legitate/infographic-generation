@@ -121,12 +121,13 @@ async function runGenerationFlow(url, title) {
         // 5. Poll for Result
         console.log("Polling for result...");
         const imageUrl = await client.waitForInfographic(notebookId, opId);
-        console.log("Success! Image:", imageUrl);
+        console.log("Success! Image found. Converting to Base64...");
+        const base64Image = await urlToBase64(imageUrl);
 
-        await updateState(videoId, { status: 'COMPLETED', image_url: imageUrl });
-        broadcastStatus(url, "COMPLETED", { image_url: imageUrl });
+        await updateState(videoId, { status: 'COMPLETED', image_url: base64Image });
+        broadcastStatus(url, "COMPLETED", { image_url: base64Image });
 
-        return { success: true, imageUrl: imageUrl };
+        return { success: true, imageUrl: base64Image };
 
     } catch (e) {
         console.error("Generation Failed:", e);
@@ -145,6 +146,23 @@ async function runGenerationFlow(url, title) {
             broadcastStatus(url, "FAILED", { error: friendlyError.message });
         }
         throw e;
+    }
+
+    // --- IMAGE HELPER ---
+    async function urlToBase64(url) {
+        try {
+            const response = await fetch(url);
+            const blob = await response.blob();
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result);
+                reader.onerror = reject;
+                reader.readAsDataURL(blob);
+            });
+        } catch (e) {
+            console.error("Failed to convert image to base64:", e);
+            return url; // Fallback to original URL if fetch fails
+        }
     }
 }
 
@@ -256,12 +274,13 @@ async function runQueueGenerationFlow(queue) {
 
                 console.log(`[Queue] Polling...`);
                 const imageUrl = await client.waitForInfographic(notebookId, opId);
-                console.log(`[Queue] Success for ${safeTitle}: ${imageUrl}`);
+                console.log(`[Queue] Success for ${safeTitle}. Converting...`);
+                const base64Image = await urlToBase64(imageUrl);
 
                 // Success State!
                 await updateState(item.videoId, {
                     status: 'COMPLETED',
-                    image_url: imageUrl,
+                    image_url: base64Image,
                     title: safeTitle
                 });
 
@@ -271,13 +290,13 @@ async function runQueueGenerationFlow(queue) {
                     const currentQueue = qResult.infographicQueue || [];
                     const qItemIndex = currentQueue.findIndex(q => q.videoId === item.videoId);
                     if (qItemIndex !== -1) {
-                        currentQueue[qItemIndex].imageUrl = imageUrl;
+                        currentQueue[qItemIndex].imageUrl = base64Image;
                         currentQueue[qItemIndex].status = 'COMPLETED';
                         await chrome.storage.local.set({ infographicQueue: currentQueue });
                     }
                 }
 
-                broadcastStatus(item.url, "COMPLETED", { image_url: imageUrl });
+                broadcastStatus(item.url, "COMPLETED", { image_url: base64Image });
 
             } catch (itemError) {
                 console.error(`[Queue] Failed item ${safeTitle}:`, itemError);
