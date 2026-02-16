@@ -64,7 +64,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         chrome.downloads.download({
             url: message.url,
             filename: message.filename
+        }, (downloadId) => {
+            if (chrome.runtime.lastError) {
+                sendResponse({ success: false, error: chrome.runtime.lastError.message });
+            } else {
+                sendResponse({ success: true, downloadId: downloadId });
+            }
         });
+        return true; // Keep channel open for async response
     } else if (message.type === 'GENERATE_QUEUE_INFOGRAPHIC') {
         runQueueGenerationFlow(message.queue)
             .then(res => sendResponse(res))
@@ -148,22 +155,7 @@ async function runGenerationFlow(url, title) {
         throw e;
     }
 
-    // --- IMAGE HELPER ---
-    async function urlToBase64(url) {
-        try {
-            const response = await fetch(url);
-            const blob = await response.blob();
-            return new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onloadend = () => resolve(reader.result);
-                reader.onerror = reject;
-                reader.readAsDataURL(blob);
-            });
-        } catch (e) {
-            console.error("Failed to convert image to base64:", e);
-            return url; // Fallback to original URL if fetch fails
-        }
-    }
+
 }
 
 function getUserFriendlyError(rawError) {
@@ -710,3 +702,19 @@ async function cleanExpiredStates() {
 }
 
 
+// --- IMAGE HELPER ---
+async function urlToBase64(url) {
+    try {
+        const response = await fetch(url);
+        const blob = await response.blob();
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+        });
+    } catch (e) {
+        console.error("Failed to convert image to base64:", e);
+        return url; // Fallback to original URL if fetch fails
+    }
+}

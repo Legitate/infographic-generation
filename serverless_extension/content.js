@@ -6,6 +6,9 @@ const UI_CONTAINER_ID = 'altrosyn-infographic-panel';
 const existingUI = document.getElementById(UI_CONTAINER_ID);
 if (existingUI) existingUI.remove();
 
+const existingGallery = document.getElementById('altrosyn-gallery-overlay');
+if (existingGallery) existingGallery.remove();
+
 // Helper to extract video ID
 function extractVideoId(url) {
     try {
@@ -18,6 +21,53 @@ function extractVideoId(url) {
     } catch (e) { }
     return null;
 }
+
+// --- SAFE CHROME WRAPPER ---
+const SafeChromeWrapper = {
+    isContextInvalid: () => !chrome.runtime?.id,
+
+    storage: {
+        local: {
+            get: (keys, callback) => {
+                if (!chrome.runtime?.id) return;
+                try {
+                    chrome.storage.local.get(keys, (result) => {
+                        if (chrome.runtime.lastError) {
+                            console.warn("Storage Get Error:", chrome.runtime.lastError);
+                            return;
+                        }
+                        if (callback) callback(result);
+                    });
+                } catch (e) { console.warn("Context invalid during storage.get"); }
+            },
+            set: (items, callback) => {
+                if (!chrome.runtime?.id) return;
+                try {
+                    chrome.storage.local.set(items, () => {
+                        if (chrome.runtime.lastError) {
+                            console.warn("Storage Set Error:", chrome.runtime.lastError);
+                            return;
+                        }
+                        if (callback) callback();
+                    });
+                } catch (e) { console.warn("Context invalid during storage.set"); }
+            }
+        }
+    },
+
+    runtime: {
+        sendMessage: (message, callback) => {
+            if (!chrome.runtime?.id) return;
+            try {
+                chrome.runtime.sendMessage(message, (response) => {
+                    // Check for lastError to avoid "unchecked runtime.lastError" warnings
+                    const err = chrome.runtime.lastError;
+                    if (callback) callback(response);
+                });
+            } catch (e) { console.warn("Context invalid during sendMessage"); }
+        }
+    }
+};
 
 // run immediately
 detectAndSendUrl();
@@ -39,7 +89,7 @@ function detectAndSendUrl() {
 
     if (isYouTubeVideo(url)) {
         console.log('YouTube video detected:', url);
-        chrome.runtime.sendMessage({ type: 'YOUTUBE_ACTIVE', url: url });
+        SafeChromeWrapper.runtime.sendMessage({ type: 'YOUTUBE_ACTIVE', url: url });
     }
 }
 
@@ -61,16 +111,13 @@ function dismissError() {
     const currentVideoId = extractVideoId(window.location.href);
     if (!currentVideoId) return;
 
-    chrome.storage.local.get(['infographicStates'], (result) => {
+    SafeChromeWrapper.storage.local.get(['infographicStates'], (result) => {
         const states = result.infographicStates || {};
         const state = states[currentVideoId];
 
         if (state && (state.status === 'FAILED' || state.status === 'LIMIT_EXCEEDED')) {
-            // clear the error state
-            // We can either delete it or set to IDLE. Deleting is safer to reset UI.
-            // But if we delete, we lose partial data if any? No, failed state usually has nothing useful.
             delete states[currentVideoId];
-            chrome.storage.local.set({ infographicStates: states }, () => {
+            SafeChromeWrapper.storage.local.set({ infographicStates: states }, () => {
                 updateUI('IDLE');
             });
         }
@@ -661,9 +708,8 @@ function getOrCreateUI() {
         // Restore from minimized click
         container.onclick = (e) => {
             if (container.classList.contains('minimized')) {
-                dismissError();
                 container.classList.remove('minimized');
-                chrome.storage.local.set({ minimized: false });
+                SafeChromeWrapper.storage.local.set({ minimized: false });
                 e.stopPropagation();
             }
         };
@@ -719,10 +765,9 @@ function getOrCreateUI() {
         if (themeToggle) {
             themeToggle.onclick = (e) => {
                 e.stopPropagation();
-                dismissError();
                 container.classList.toggle('dark-mode');
                 const isDark = container.classList.contains('dark-mode');
-                chrome.storage.local.set({ theme: isDark ? 'dark' : 'light' });
+                SafeChromeWrapper.storage.local.set({ theme: isDark ? 'dark' : 'light' });
             };
         }
 
@@ -731,9 +776,8 @@ function getOrCreateUI() {
         if (minBtn) {
             minBtn.onclick = (e) => {
                 e.stopPropagation();
-                dismissError();
                 container.classList.add('minimized');
-                chrome.storage.local.set({ minimized: true });
+                SafeChromeWrapper.storage.local.set({ minimized: true });
             };
         }
 
@@ -905,7 +949,7 @@ function getOrCreateUI() {
             }
         });
         // Restore minimized state & Theme
-        chrome.storage.local.get(['minimized', 'theme'], (result) => {
+        SafeChromeWrapper.storage.local.get(['minimized', 'theme'], (result) => {
             if (result.minimized) {
                 container.classList.add('minimized');
             }
@@ -1031,7 +1075,7 @@ function updateUI(status, imageUrl = null, errorMessage = null, title = null) {
     const currentVideoId = extractVideoId(window.location.href);
 
     // Fetch queue state for main button lock AND detailed status text
-    chrome.storage.local.get(['isQueueRunning', 'queueStatusText'], (qResult) => {
+    SafeChromeWrapper.storage.local.get(['isQueueRunning', 'queueStatusText'], (qResult) => {
         const isQueueRunning = qResult.isQueueRunning || false;
         const queueStatusText = qResult.queueStatusText || 'Queue Processing...';
 
@@ -1095,7 +1139,7 @@ function updateUI(status, imageUrl = null, errorMessage = null, title = null) {
             filename = `${safeTitle}.png`;
         }
 
-        chrome.runtime.sendMessage({
+        SafeChromeWrapper.runtime.sendMessage({
             type: 'DOWNLOAD_IMAGE',
             url: imageUrl,
             filename: filename
@@ -1122,7 +1166,7 @@ function updateUI(status, imageUrl = null, errorMessage = null, title = null) {
 
 // Scoped State Restoration with Global Persistence
 function restoreStateForCurrentVideo() {
-    chrome.storage.local.get(['infographicStates', 'lastActiveVideoId'], (result) => {
+    SafeChromeWrapper.storage.local.get(['infographicStates', 'lastActiveVideoId'], (result) => {
         const states = result.infographicStates || {};
         const lastId = result.lastActiveVideoId;
         const currentId = extractVideoId(window.location.href);
@@ -1143,7 +1187,7 @@ function restoreStateForCurrentVideo() {
 
                     if (!isGlobalRunning) {
                         console.log(`Updating global focus to ${currentId} (Previous: ${lastId} was not running)`);
-                        chrome.storage.local.set({ lastActiveVideoId: currentId });
+                        SafeChromeWrapper.storage.local.set({ lastActiveVideoId: currentId });
                     } else {
                         console.log(`Keeping global focus on ${lastId} because it is RUNNING.`);
                     }
@@ -1172,7 +1216,7 @@ function restoreStateForCurrentVideo() {
                 const cleanedState = { ...state, status: 'FAILED', error: 'Operation timed out (stale)' };
                 // Update local storage effectively "healing" the state
                 states[targetId] = cleanedState;
-                chrome.storage.local.set({ infographicStates: states });
+                SafeChromeWrapper.storage.local.set({ infographicStates: states });
 
                 // Show the failed state
                 updateUI('FAILED', null, 'Operation timed out (stale)');
@@ -1218,13 +1262,13 @@ function startGeneration() {
     const url = window.location.href;
     const title = document.title.replace(' - YouTube', '');
     updateUI('RUNNING');
-    chrome.runtime.sendMessage({ type: 'GENERATE_INFOGRAPHIC', url: url, title: title });
+    SafeChromeWrapper.runtime.sendMessage({ type: 'GENERATE_INFOGRAPHIC', url: url, title: title });
 }
 
 // --- QUEUE LOGIC ---
 
 function updateQueueUI(currentStatus = 'IDLE') {
-    chrome.storage.local.get(['infographicQueue', 'isQueueRunning'], (result) => {
+    SafeChromeWrapper.storage.local.get(['infographicQueue', 'isQueueRunning'], (result) => {
         const queue = result.infographicQueue || [];
         const isQueueRunning = result.isQueueRunning || false;
 
@@ -1341,7 +1385,7 @@ function updateQueueUI(currentStatus = 'IDLE') {
                         dlLink.onclick = (e) => {
                             e.stopPropagation();
                             // Use extension downloader for better filename control if possible
-                            chrome.runtime.sendMessage({
+                            SafeChromeWrapper.runtime.sendMessage({
                                 type: 'DOWNLOAD_IMAGE',
                                 url: item.imageUrl,
                                 filename: `${item.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.png`
@@ -1382,11 +1426,11 @@ function handleAddToQueue() {
 
     if (!videoId) return;
 
-    chrome.storage.local.get(['infographicQueue'], (result) => {
+    SafeChromeWrapper.storage.local.get(['infographicQueue'], (result) => {
         const queue = result.infographicQueue || [];
         if (!queue.some(item => item.videoId === videoId)) {
             queue.push({ videoId, url, title });
-            chrome.storage.local.set({ infographicQueue: queue }, () => {
+            SafeChromeWrapper.storage.local.set({ infographicQueue: queue }, () => {
                 // If we are adding, we must be in a state where we CAN add, so likely IDLE or at least not RUNNING queue
                 // But let's check current UI state/storage if we wanted to be 100% pure, but IDLE is safe default for "enable buttons"
                 // Actually, best to just call it without args to default to IDLE which is "Interactive"
@@ -1397,17 +1441,17 @@ function handleAddToQueue() {
 }
 
 function removeFromQueue(index) {
-    chrome.storage.local.get(['infographicQueue'], (result) => {
+    SafeChromeWrapper.storage.local.get(['infographicQueue'], (result) => {
         const queue = result.infographicQueue || [];
         queue.splice(index, 1);
-        chrome.storage.local.set({ infographicQueue: queue }, () => {
+        SafeChromeWrapper.storage.local.set({ infographicQueue: queue }, () => {
             updateQueueUI('IDLE');
         });
     });
 }
 
 function clearQueue() {
-    chrome.storage.local.set({ infographicQueue: [] }, () => {
+    SafeChromeWrapper.storage.local.set({ infographicQueue: [] }, () => {
         updateQueueUI('IDLE');
     });
 }
@@ -1419,7 +1463,7 @@ function toggleQueueList() {
 }
 
 function startQueueGeneration() {
-    chrome.storage.local.get(['infographicQueue'], (result) => {
+    SafeChromeWrapper.storage.local.get(['infographicQueue'], (result) => {
         const queue = result.infographicQueue || [];
         if (queue.length === 0) return;
 
@@ -1427,7 +1471,7 @@ function startQueueGeneration() {
         const statusEl = document.getElementById(UI_CONTAINER_ID + '-status');
         if (statusEl) statusEl.textContent = `Processing ${queue.length} videos...`;
 
-        chrome.runtime.sendMessage({ type: 'GENERATE_QUEUE_INFOGRAPHIC', queue: queue });
+        SafeChromeWrapper.runtime.sendMessage({ type: 'GENERATE_QUEUE_INFOGRAPHIC', queue: queue });
     });
 }
 
@@ -1435,7 +1479,7 @@ function startQueueGeneration() {
 function resetToInitialState() {
     const currentVideoId = extractVideoId(window.location.href);
 
-    chrome.storage.local.get(['infographicStates'], (result) => {
+    SafeChromeWrapper.storage.local.get(['infographicStates'], (result) => {
         const states = result.infographicStates || {};
 
         if (currentVideoId) {
@@ -1453,7 +1497,7 @@ function resetToInitialState() {
             // Update storage: 
             // 1. Save cleaned states
             // 2. Set lastActiveVideoId to current (which is now empty/IDLE) to focus here
-            chrome.storage.local.set({
+            SafeChromeWrapper.storage.local.set({
                 infographicStates: states,
                 lastActiveVideoId: currentVideoId
             }, () => {
@@ -1462,7 +1506,7 @@ function resetToInitialState() {
         } else {
             // On Home Page or other non-video page
             // Just clear the global sticky lock so UI resets to IDLE (or "Invalid Context")
-            chrome.storage.local.set({
+            SafeChromeWrapper.storage.local.set({
                 lastActiveVideoId: null
             }, () => {
                 restoreStateForCurrentVideo();
@@ -1478,7 +1522,7 @@ let currentGalleryIndex = 0;
 
 function openGallery(preferredImageUrl = null) {
     dismissError();
-    chrome.storage.local.get(['infographicStates'], (result) => {
+    SafeChromeWrapper.storage.local.get(['infographicStates'], (result) => {
         const states = result.infographicStates || {};
 
         // Filter items with image_url and sort by time (newest first)
@@ -1489,6 +1533,11 @@ function openGallery(preferredImageUrl = null) {
 
         // REMOVED CHECK: if (galleryImages.length === 0) return; so we can show empty state
 
+        console.log("Opening Gallery. Images:", galleryImages); // DEBUG
+        if (galleryImages.length === 0) {
+            console.log("Gallery empty (no images with URLs)");
+        }
+
         // Find index of preferred image
         if (preferredImageUrl) {
             const idx = galleryImages.findIndex(img => img.image_url === preferredImageUrl);
@@ -1496,6 +1545,8 @@ function openGallery(preferredImageUrl = null) {
         } else {
             currentGalleryIndex = 0;
         }
+
+        console.log("Initial Gallery Index:", currentGalleryIndex); // DEBUG
 
         updateGalleryContent();
 
@@ -1520,7 +1571,7 @@ function handleImageError(failedUrl) {
     console.log("Image failed to load (expired/broken), removing:", failedUrl);
 
     // 1. Remove from chrome.storage.local
-    chrome.storage.local.get(['infographicStates'], (result) => {
+    SafeChromeWrapper.storage.local.get(['infographicStates'], (result) => {
         const states = result.infographicStates || {};
         let modified = false;
 
@@ -1533,7 +1584,7 @@ function handleImageError(failedUrl) {
         }
 
         if (modified) {
-            chrome.storage.local.set({ infographicStates: states });
+            SafeChromeWrapper.storage.local.set({ infographicStates: states });
         }
     });
 
@@ -1563,14 +1614,16 @@ function handleImageError(failedUrl) {
     }
 }
 
-function prevGalleryImage() {
+function prevGalleryImage(e) {
+    if (e) e.stopPropagation();
     if (currentGalleryIndex > 0) {
         currentGalleryIndex--;
         updateGalleryContent();
     }
 }
 
-function nextGalleryImage() {
+function nextGalleryImage(e) {
+    if (e) e.stopPropagation();
     if (currentGalleryIndex < galleryImages.length - 1) {
         currentGalleryIndex++;
         updateGalleryContent();
@@ -1584,11 +1637,26 @@ function downloadGalleryImage(e) {
 
     const filename = (item.title ? item.title.replace(/[^a-z0-9]/gi, '_').toLowerCase() : "infographic") + ".png";
 
-    chrome.runtime.sendMessage({
-        type: 'DOWNLOAD_IMAGE',
-        url: item.image_url,
-        filename: filename
-    });
+    console.log(`[Download] Starting download for: ${item.title}`);
+    try {
+        SafeChromeWrapper.runtime.sendMessage({
+            type: 'DOWNLOAD_IMAGE',
+            url: item.image_url,
+            filename: filename
+        }, (response) => {
+            if (chrome.runtime.lastError) {
+                console.error("[Download] Runtime Error:", chrome.runtime.lastError);
+            } else {
+                console.log("[Download] Sent message success");
+            }
+        });
+    } catch (e) {
+        if (e.message.includes("Extension context invalidated")) {
+            alert("The extension has been updated. Please refresh this page to continue.");
+        } else {
+            console.error("[Download] Unexpected error:", e);
+        }
+    }
 }
 
 function updateGalleryContent() {
@@ -1626,15 +1694,32 @@ function updateGalleryContent() {
     const item = galleryImages[currentGalleryIndex];
     if (!item) return;
 
+    console.log(`[Gallery Update] Index: ${currentGalleryIndex}, IDs found: Img=${!!imgEl}, Cap=${!!captionEl}`);
+    console.log(`[Gallery Update] Setting Item: ${item.title}`);
+    console.log(`[Gallery Update] Image URL Start: ${item.image_url ? item.image_url.substring(0, 50) : 'null'}`);
+
     // Reset previous error handlers to avoid stacking
     imgEl.onerror = null;
 
-    imgEl.src = item.image_url;
+    // Force src update by clearing first (helps with large Base64 rendering issues)
+    imgEl.style.opacity = '0.5';
+    imgEl.removeAttribute('src'); // Clear src cleanly
 
-    // Handle expired/broken images
-    imgEl.onerror = () => {
-        handleImageError(item.image_url);
-    };
+    setTimeout(() => {
+        // Handle expired/broken images ONLY for the real URL
+        imgEl.onerror = () => {
+            console.log("[Gallery] Image load error for:", item.title);
+            handleImageError(item.image_url);
+        };
+
+        imgEl.onload = () => {
+            imgEl.style.opacity = '1';
+            console.log("[Gallery] Image loaded successfully");
+        };
+
+        imgEl.src = item.image_url;
+        console.log(`[Gallery Update] Set new src for ${item.title}`);
+    }, 10);
 
     captionEl.textContent = item.title || "Untitled Infographic";
     counterEl.textContent = `${currentGalleryIndex + 1} / ${galleryImages.length}`;
