@@ -87,6 +87,7 @@ async function runGenerationFlow(url, title) {
     if (!videoId) throw new Error("Invalid YouTube URL");
 
     await updateState(videoId, { status: 'RUNNING', operation_id: Date.now(), title: title });
+    await chrome.storage.local.set({ lastActiveVideoId: videoId }); // Ensure global lock for single video
     broadcastStatus(url, "RUNNING");
 
     // Daily Limit Check moved to execution phase (if opId is missing)

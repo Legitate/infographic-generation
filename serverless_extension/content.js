@@ -1262,6 +1262,8 @@ function startGeneration() {
     const url = window.location.href;
     const title = document.title.replace(' - YouTube', '');
     updateUI('RUNNING');
+    const videoId = extractVideoId(url);
+    if (videoId) SafeChromeWrapper.storage.local.set({ lastActiveVideoId: videoId });
     SafeChromeWrapper.runtime.sendMessage({ type: 'GENERATE_INFOGRAPHIC', url: url, title: title });
 }
 
