@@ -57,6 +57,26 @@ function checkAuthState() {
     restoreStateForCurrentVideo();
 }
 
+function dismissError() {
+    const currentVideoId = extractVideoId(window.location.href);
+    if (!currentVideoId) return;
+
+    chrome.storage.local.get(['infographicStates'], (result) => {
+        const states = result.infographicStates || {};
+        const state = states[currentVideoId];
+
+        if (state && (state.status === 'FAILED' || state.status === 'LIMIT_EXCEEDED')) {
+            // clear the error state
+            // We can either delete it or set to IDLE. Deleting is safer to reset UI.
+            // But if we delete, we lose partial data if any? No, failed state usually has nothing useful.
+            delete states[currentVideoId];
+            chrome.storage.local.set({ infographicStates: states }, () => {
+                updateUI('IDLE');
+            });
+        }
+    });
+}
+
 // --- UI INJECTION & LINK IMPLEMENTATION ---
 
 // --- UI INJECTION & LINK IMPLEMENTATION ---
@@ -641,6 +661,7 @@ function getOrCreateUI() {
         // Restore from minimized click
         container.onclick = (e) => {
             if (container.classList.contains('minimized')) {
+                dismissError();
                 container.classList.remove('minimized');
                 chrome.storage.local.set({ minimized: false });
                 e.stopPropagation();
@@ -688,6 +709,7 @@ function getOrCreateUI() {
         if (galleryBtn) {
             galleryBtn.onclick = (e) => {
                 e.stopPropagation();
+                dismissError();
                 openGallery();
             };
         }
@@ -697,6 +719,7 @@ function getOrCreateUI() {
         if (themeToggle) {
             themeToggle.onclick = (e) => {
                 e.stopPropagation();
+                dismissError();
                 container.classList.toggle('dark-mode');
                 const isDark = container.classList.contains('dark-mode');
                 chrome.storage.local.set({ theme: isDark ? 'dark' : 'light' });
@@ -708,6 +731,7 @@ function getOrCreateUI() {
         if (minBtn) {
             minBtn.onclick = (e) => {
                 e.stopPropagation();
+                dismissError();
                 container.classList.add('minimized');
                 chrome.storage.local.set({ minimized: true });
             };
@@ -1190,6 +1214,7 @@ chrome.runtime.onMessage.addListener((message) => {
 });
 
 function startGeneration() {
+    dismissError();
     const url = window.location.href;
     const title = document.title.replace(' - YouTube', '');
     updateUI('RUNNING');
@@ -1350,6 +1375,7 @@ function updateQueueUI(currentStatus = 'IDLE') {
 }
 
 function handleAddToQueue() {
+    dismissError();
     const url = window.location.href;
     const videoId = extractVideoId(url);
     const title = document.title.replace(' - YouTube', '');
@@ -1387,6 +1413,7 @@ function clearQueue() {
 }
 
 function toggleQueueList() {
+    dismissError();
     const list = document.getElementById(UI_CONTAINER_ID + '-queue-list');
     if (list) list.classList.toggle('expanded');
 }
@@ -1412,9 +1439,16 @@ function resetToInitialState() {
         const states = result.infographicStates || {};
 
         if (currentVideoId) {
-            // Remove existing state for this video
+            // Soft Reset: Preserve image_url and completedAt if they exist
+            // so gallery can still show them.
             if (states[currentVideoId]) {
-                delete states[currentVideoId];
+                const old = states[currentVideoId];
+                states[currentVideoId] = {
+                    ...old,
+                    status: 'IDLE',
+                    error: null,
+                    // Keep image_url, title, completedAt
+                };
             }
             // Update storage: 
             // 1. Save cleaned states
@@ -1443,14 +1477,14 @@ let galleryImages = [];
 let currentGalleryIndex = 0;
 
 function openGallery(preferredImageUrl = null) {
+    dismissError();
     chrome.storage.local.get(['infographicStates'], (result) => {
         const states = result.infographicStates || {};
 
-        // Filter COMPLETED items and sort by time (newest first)
-        // Note: existing items might not have completedAt, but we can treat them as older or newer depending on needs.
-        // Let's sort by completedAt desc, treating undefined as oldest.
+        // Filter items with image_url and sort by time (newest first)
+        // Keep older images even if status is not COMPLETED (e.g. during regeneration)
         galleryImages = Object.values(states)
-            .filter(s => s.status === 'COMPLETED' && s.image_url)
+            .filter(s => s.image_url)
             .sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0));
 
         // REMOVED CHECK: if (galleryImages.length === 0) return; so we can show empty state
