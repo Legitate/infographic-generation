@@ -655,8 +655,9 @@ function getOrCreateUI() {
                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
                 Notebook Gen
             </div>
-        <div style="display:flex; gap:8px; align-items:center;">
-                <!-- Theme Toggle -->
+                <button class="altrosyn-min-btn" id="${UI_CONTAINER_ID}-gallery-btn" title="Open Gallery">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                </button>
                 <button class="altrosyn-min-btn" id="${UI_CONTAINER_ID}-theme-toggle" title="Toggle Theme">
                      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
                 </button>
@@ -681,6 +682,15 @@ function getOrCreateUI() {
             </div>
         `;
         container.appendChild(header);
+
+        // Gallery Button Handler
+        const galleryBtn = header.querySelector(`#${UI_CONTAINER_ID}-gallery-btn`);
+        if (galleryBtn) {
+            galleryBtn.onclick = (e) => {
+                e.stopPropagation();
+                openGallery();
+            };
+        }
 
         // Theme Toggle Handler
         const themeToggle = header.querySelector(`#${UI_CONTAINER_ID}-theme-toggle`);
@@ -825,6 +835,10 @@ function getOrCreateUI() {
                     </button>
                 </div>
                 <div class="altrosyn-gallery-content">
+                    <div id="altrosyn-gallery-empty-msg" style="display:none; flex-direction:column; align-items:center; opacity:0.6;">
+                         <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                         <span style="margin-top:12px; font-weight:500;">Gallery is empty</span>
+                    </div>
                     <button class="altrosyn-gallery-nav-btn altrosyn-gallery-prev" title="Previous">
                         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
                     </button>
@@ -1439,7 +1453,7 @@ function openGallery(preferredImageUrl = null) {
             .filter(s => s.status === 'COMPLETED' && s.image_url)
             .sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0));
 
-        if (galleryImages.length === 0) return; // Nothing to show
+        // REMOVED CHECK: if (galleryImages.length === 0) return; so we can show empty state
 
         // Find index of preferred image
         if (preferredImageUrl) {
@@ -1467,22 +1481,52 @@ function closeGallery() {
     }, 300);
 }
 
-function updateGalleryContent() {
-    const item = galleryImages[currentGalleryIndex];
-    if (!item) return;
 
-    const imgEl = document.getElementById('altrosyn-gallery-img');
-    const captionEl = document.getElementById('altrosyn-gallery-caption');
-    const counterEl = document.getElementById('altrosyn-gallery-counter');
-    const prevBtn = document.querySelector('.altrosyn-gallery-prev');
-    const nextBtn = document.querySelector('.altrosyn-gallery-next');
+function handleImageError(failedUrl) {
+    console.log("Image failed to load (expired/broken), removing:", failedUrl);
 
-    imgEl.src = item.image_url;
-    captionEl.textContent = item.title || "Untitled Infographic";
-    counterEl.textContent = `${currentGalleryIndex + 1} / ${galleryImages.length}`;
+    // 1. Remove from chrome.storage.local
+    chrome.storage.local.get(['infographicStates'], (result) => {
+        const states = result.infographicStates || {};
+        let modified = false;
 
-    prevBtn.disabled = currentGalleryIndex === 0;
-    nextBtn.disabled = currentGalleryIndex === galleryImages.length - 1;
+        // Find key(s) with this URL and delete
+        for (const [key, state] of Object.entries(states)) {
+            if (state.image_url === failedUrl) {
+                delete states[key];
+                modified = true;
+            }
+        }
+
+        if (modified) {
+            chrome.storage.local.set({ infographicStates: states });
+        }
+    });
+
+    // 2. Remove from runtime gallery array
+    const index = galleryImages.findIndex(img => img.image_url === failedUrl);
+    if (index !== -1) {
+        galleryImages.splice(index, 1);
+
+        // 3. Update UI
+        if (galleryImages.length === 0) {
+            // Keep open, show empty state
+            updateGalleryContent();
+        } else {
+            // Adjust index if we removed the last item or an item before current
+            // If we removed current (index === currentGalleryIndex), the next item shifts into this slot, 
+            // so index stays same, UNLESS we were at the end.
+            if (index < currentGalleryIndex) {
+                currentGalleryIndex--;
+            }
+            if (currentGalleryIndex >= galleryImages.length) {
+                currentGalleryIndex = galleryImages.length - 1;
+            }
+
+            // Show next available
+            updateGalleryContent();
+        }
+    }
 }
 
 function prevGalleryImage() {
@@ -1511,4 +1555,56 @@ function downloadGalleryImage(e) {
         url: item.image_url,
         filename: filename
     });
+}
+
+function updateGalleryContent() {
+    const imgEl = document.getElementById('altrosyn-gallery-img');
+    const captionEl = document.getElementById('altrosyn-gallery-caption');
+    const counterEl = document.getElementById('altrosyn-gallery-counter');
+    const prevBtn = document.querySelector('.altrosyn-gallery-prev');
+    const nextBtn = document.querySelector('.altrosyn-gallery-next');
+    const downloadBtn = document.getElementById('altrosyn-gallery-download');
+    const emptyMsg = document.getElementById('altrosyn-gallery-empty-msg');
+    const wrapper = document.querySelector('.altrosyn-gallery-image-wrapper');
+
+    if (galleryImages.length === 0) {
+        // Empty State
+        if (wrapper) wrapper.style.display = 'none';
+        if (prevBtn) prevBtn.style.display = 'none';
+        if (nextBtn) nextBtn.style.display = 'none';
+        if (downloadBtn) downloadBtn.style.display = 'none';
+        if (counterEl) counterEl.style.display = 'none';
+        if (captionEl) captionEl.style.display = 'none';
+
+        if (emptyMsg) emptyMsg.style.display = 'flex';
+        return;
+    }
+
+    // Has images - Reset UI visibility
+    if (wrapper) wrapper.style.display = 'flex';
+    if (prevBtn) prevBtn.style.display = 'flex';
+    if (nextBtn) nextBtn.style.display = 'flex';
+    if (downloadBtn) downloadBtn.style.display = 'block'; // or flex depending on CSS
+    if (counterEl) counterEl.style.display = 'flex';
+    if (captionEl) captionEl.style.display = 'block';
+    if (emptyMsg) emptyMsg.style.display = 'none';
+
+    const item = galleryImages[currentGalleryIndex];
+    if (!item) return;
+
+    // Reset previous error handlers to avoid stacking
+    imgEl.onerror = null;
+
+    imgEl.src = item.image_url;
+
+    // Handle expired/broken images
+    imgEl.onerror = () => {
+        handleImageError(item.image_url);
+    };
+
+    captionEl.textContent = item.title || "Untitled Infographic";
+    counterEl.textContent = `${currentGalleryIndex + 1} / ${galleryImages.length}`;
+
+    prevBtn.disabled = currentGalleryIndex === 0;
+    nextBtn.disabled = currentGalleryIndex === galleryImages.length - 1;
 }
