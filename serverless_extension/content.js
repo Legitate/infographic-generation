@@ -9,6 +9,9 @@ if (existingUI) existingUI.remove();
 const existingGallery = document.getElementById('altrosyn-gallery-overlay');
 if (existingGallery) existingGallery.remove();
 
+const existingTooltip = document.getElementById('altrosyn-queue-tooltip');
+if (existingTooltip) existingTooltip.remove();
+
 // Helper to extract video ID
 function extractVideoId(url) {
     try {
@@ -525,6 +528,24 @@ function injectStyles() {
             opacity: 1;
         }
 
+        #altrosyn-queue-tooltip {
+            position: fixed;
+            z-index: 2147483650;
+            background-color: #333;
+            color: #fff;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            max-width: 300px;
+            width: auto;
+            visibility: hidden;
+            opacity: 0;
+            transition: opacity 0.2s;
+            pointer-events: none;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            line-height: 1.4;
+        }
+
         /* --- GALLERY UI --- */
         #altrosyn-gallery-overlay {
             position: fixed;
@@ -750,6 +771,14 @@ function getOrCreateUI() {
         `;
         container.appendChild(header);
 
+        // Global Queue Tooltip
+        let queueTooltip = document.getElementById('altrosyn-queue-tooltip');
+        if (!queueTooltip) {
+            queueTooltip = document.createElement('div');
+            queueTooltip.id = 'altrosyn-queue-tooltip';
+            document.body.appendChild(queueTooltip);
+        }
+
         // Gallery Button Handler
         const galleryBtn = header.querySelector(`#${UI_CONTAINER_ID}-gallery-btn`);
         if (galleryBtn) {
@@ -829,7 +858,7 @@ function getOrCreateUI() {
         // Add To Queue Button
         const addToQueueBtn = document.createElement('button');
         addToQueueBtn.id = UI_CONTAINER_ID + '-queue-add-btn';
-        addToQueueBtn.className = 'altrosyn-btn altrosyn-btn-secondary';
+        addToQueueBtn.className = 'altrosyn-btn';
         addToQueueBtn.textContent = 'Add to Queue';
         addToQueueBtn.onclick = handleAddToQueue;
         interactionContainer.appendChild(addToQueueBtn);
@@ -1365,15 +1394,41 @@ function updateQueueUI(currentStatus = 'IDLE') {
                         errIcon.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>`;
                         errorContainer.appendChild(errIcon);
 
-                        // Tooltip
-                        const tooltip = document.createElement('div');
-                        tooltip.className = 'altrosyn-tooltip';
-                        tooltip.style.bottom = '120%';
-                        tooltip.style.right = '-10px';
-                        tooltip.style.width = '180px';
-                        tooltip.textContent = item.error || "Generation failed";
-                        errorContainer.appendChild(tooltip);
+                        // Tooltip Events
+                        errIcon.onmouseenter = (e) => {
+                            const tooltip = document.getElementById('altrosyn-queue-tooltip');
+                            if (tooltip) {
+                                tooltip.textContent = item.error || "Generation failed";
+                                const rect = e.target.getBoundingClientRect();
+                                tooltip.style.visibility = 'hidden'; // Hide to calculate size
+                                tooltip.style.display = 'block';
 
+                                const tipHeight = tooltip.offsetHeight;
+                                const tipWidth = tooltip.offsetWidth;
+
+                                let top = rect.top - tipHeight - 10;
+                                let left = rect.left + (rect.width / 2) - (tipWidth / 2);
+
+                                // Boundary checks
+                                if (top < 0) top = rect.bottom + 10;
+                                if (left < 0) left = 10;
+                                if (left + tipWidth > window.innerWidth) left = window.innerWidth - tipWidth - 10;
+
+                                tooltip.style.top = `${top}px`;
+                                tooltip.style.left = `${left}px`;
+                                tooltip.style.visibility = 'visible';
+                                tooltip.style.opacity = '1';
+                            }
+                        };
+                        errIcon.onmouseleave = () => {
+                            const tooltip = document.getElementById('altrosyn-queue-tooltip');
+                            if (tooltip) {
+                                tooltip.style.visibility = 'hidden';
+                                tooltip.style.opacity = '0';
+                            }
+                        };
+
+                        errorContainer.appendChild(errIcon);
                         actionsDiv.appendChild(errorContainer);
                     }
                     // 3. COMPLETED STATE (Download Link)
