@@ -893,6 +893,14 @@ function getOrCreateUI() {
         genQueueBtn.style.fontSize = '12px';
         genQueueBtn.onclick = startQueueGeneration;
 
+        const genBatchBtn = document.createElement('button');
+        genBatchBtn.id = UI_CONTAINER_ID + '-queue-batch-btn';
+        genBatchBtn.className = 'altrosyn-btn';
+        genBatchBtn.textContent = 'Generate Combined';
+        genBatchBtn.style.fontSize = '12px';
+        genBatchBtn.title = "Process all videos into a SINGLE Notebook";
+        genBatchBtn.onclick = startQueueBatchGeneration;
+
         const clearQueueBtn = document.createElement('button');
         clearQueueBtn.className = 'altrosyn-btn altrosyn-btn-secondary';
         clearQueueBtn.textContent = 'Clear';
@@ -901,6 +909,7 @@ function getOrCreateUI() {
         clearQueueBtn.onclick = clearQueue;
 
         queueControls.appendChild(genQueueBtn);
+        queueControls.appendChild(genBatchBtn);
         queueControls.appendChild(clearQueueBtn);
         queueContainer.appendChild(queueControls);
 
@@ -1195,6 +1204,10 @@ function updateUI(status, imageUrl = null, errorMessage = null, title = null) {
 
 // Scoped State Restoration with Global Persistence
 function restoreStateForCurrentVideo() {
+    // We need to get states, lastActive, and potentially the image for the current/active video
+    // Since we don't know which video IS active yet, we might need to do two-step or just get everything if not too big?
+    // Let's do two-step for optimization: Get states first, find target ID, then get image if needed.
+
     SafeChromeWrapper.storage.local.get(['infographicStates', 'lastActiveVideoId'], (result) => {
         const states = result.infographicStates || {};
         const lastId = result.lastActiveVideoId;
@@ -1208,8 +1221,7 @@ function restoreStateForCurrentVideo() {
             // If this video has data, it takes precedence.
             if (['RUNNING', 'COMPLETED', 'FAILED', 'AUTH_PENDING', 'LIMIT_EXCEEDED'].includes(localState.status)) {
                 targetId = currentId;
-                // Self-Heal: If we are viewing a completed video, make it the global active one
-                // so it persists if we go Home. But ONLY if we aren't interrupting a running job elsewhere.
+                // Self-Heal logic...
                 if (lastId !== currentId) {
                     const lastGlobalState = states[lastId];
                     const isGlobalRunning = lastGlobalState && lastGlobalState.status === 'RUNNING';
@@ -1237,35 +1249,35 @@ function restoreStateForCurrentVideo() {
             const state = states[targetId];
 
             // 3. Stale State Cleanup (Safety Check)
-            // If it's been RUNNING for > 5 minutes, it's likely dead.
             const STALE_TIMEOUT = 5 * 60 * 1000; // 5 mins
             if (state.status === 'RUNNING' && state.operation_id && (Date.now() - state.operation_id > STALE_TIMEOUT)) {
-                console.warn(`Detected stale RUNNING state for ${targetId} (Age: ${Date.now() - state.operation_id}ms). Resetting.`);
-                // Auto-fail it to unlock UI
+                // ... (existing stale logic)
                 const cleanedState = { ...state, status: 'FAILED', error: 'Operation timed out (stale)' };
-                // Update local storage effectively "healing" the state
                 states[targetId] = cleanedState;
                 SafeChromeWrapper.storage.local.set({ infographicStates: states });
-
-                // Show the failed state
                 updateUI('FAILED', null, 'Operation timed out (stale)');
                 return;
             }
 
-            if (state.status === 'AUTH_PENDING') {
-                // No auto-retry here for now - user needs to login elsewhere.
-                // Ideally we could detect login success but that's complex for now.
-                return;
+            if (state.status === 'AUTH_PENDING') return;
+
+            // CHECK FOR IMAGE
+            if (state.hasImage && !state.image_url) {
+                // Fetch the image key
+                SafeChromeWrapper.storage.local.get([`img_${targetId}`], (imgResult) => {
+                    const imgData = imgResult[`img_${targetId}`];
+                    updateUI(state.status, imgData, state.error, state.title);
+                });
+            } else {
+                updateUI(state.status, state.image_url, state.error, state.title);
             }
 
-            updateUI(state.status, state.image_url, state.error, state.title);
+            updateQueueUI(state.status);
         } else {
             // No sticky state, fall back to current context
             if (currentId) {
-                // We are on a video, and no global job is active. IDLE.
                 updateUI('IDLE');
             } else {
-                // On Home, no global job.
                 updateUI('INVALID_CONTEXT', null, "Open a video to generate");
             }
         }
@@ -1349,16 +1361,44 @@ function updateQueueUI(currentStatus = 'IDLE') {
                 emptyMsg.style.textAlign = 'center';
                 emptyMsg.style.padding = '8px';
                 listEl.appendChild(emptyMsg);
-                if (genBtn) genBtn.disabled = true;
+                if (genBtn) {
+                    genBtn.disabled = true;
+                    genBtn.style.opacity = '0.5';
+                    genBtn.style.cursor = 'not-allowed';
+                }
+                const genBatchBtn = document.getElementById(UI_CONTAINER_ID + '-queue-batch-btn');
+                if (genBatchBtn) {
+                    genBatchBtn.disabled = true;
+                    genBatchBtn.style.opacity = '0.5';
+                    genBatchBtn.style.cursor = 'not-allowed';
+                }
             } else {
                 // Generate Button Logic
+                const genBatchBtn = document.getElementById(UI_CONTAINER_ID + '-queue-batch-btn');
+
                 if (genBtn) {
                     if (isRunning) {
                         genBtn.disabled = true;
                         genBtn.textContent = 'Processing...';
+                        genBtn.style.opacity = '0.5';
+                        genBtn.style.cursor = 'not-allowed';
+                        if (genBatchBtn) {
+                            genBatchBtn.disabled = true;
+                            genBatchBtn.textContent = 'Processing...';
+                            genBatchBtn.style.opacity = '0.5';
+                            genBatchBtn.style.cursor = 'not-allowed';
+                        }
                     } else {
                         genBtn.disabled = false;
                         genBtn.textContent = 'Generate All';
+                        genBtn.style.opacity = '1';
+                        genBtn.style.cursor = 'pointer';
+                        if (genBatchBtn) {
+                            genBatchBtn.disabled = false;
+                            genBatchBtn.textContent = 'Generate Combined';
+                            genBatchBtn.style.opacity = '1';
+                            genBatchBtn.style.cursor = 'pointer';
+                        }
                     }
                 }
 
@@ -1508,8 +1548,15 @@ function removeFromQueue(index) {
 }
 
 function clearQueue() {
-    SafeChromeWrapper.storage.local.set({ infographicQueue: [] }, () => {
+    SafeChromeWrapper.storage.local.set({
+        infographicQueue: [],
+        queueStatusText: null
+    }, () => {
         updateQueueUI('IDLE');
+        updateUI('IDLE'); // Clear any global error message
+
+        // Also clear any persistent error on the current video if present
+        dismissError();
     });
 }
 
@@ -1528,10 +1575,39 @@ function startQueueGeneration() {
         const statusEl = document.getElementById(UI_CONTAINER_ID + '-status');
         if (statusEl) statusEl.textContent = `Processing ${queue.length} videos...`;
 
-        SafeChromeWrapper.runtime.sendMessage({ type: 'GENERATE_QUEUE_INFOGRAPHIC', queue: queue });
+        SafeChromeWrapper.runtime.sendMessage({ type: 'GENERATE_QUEUE_INFOGRAPHIC', queue: queue }, (response) => {
+            if (chrome.runtime.lastError) {
+                updateUI('FAILED', null, chrome.runtime.lastError.message);
+                return;
+            }
+            if (response && !response.success) {
+                updateUI('FAILED', null, response.error || 'Queue generation failed to start');
+            }
+        });
     });
 }
 
+
+function startQueueBatchGeneration() {
+    SafeChromeWrapper.storage.local.get(['infographicQueue'], (result) => {
+        const queue = result.infographicQueue || [];
+        if (queue.length === 0) return;
+
+        updateUI('RUNNING'); // Triggers updateQueueUI('RUNNING') disabling buttons
+        const statusEl = document.getElementById(UI_CONTAINER_ID + '-status');
+        if (statusEl) statusEl.textContent = `Batch Processing ${queue.length} videos...`;
+
+        SafeChromeWrapper.runtime.sendMessage({ type: 'GENERATE_QUEUE_BATCH_SINGLE', queue: queue }, (response) => {
+            if (chrome.runtime.lastError) {
+                updateUI('FAILED', null, chrome.runtime.lastError.message);
+                return;
+            }
+            if (response && !response.success) {
+                updateUI('FAILED', null, response.error || 'Batch generation failed to start');
+            }
+        });
+    });
+}
 
 function resetToInitialState() {
     const currentVideoId = extractVideoId(window.location.href);
@@ -1579,21 +1655,37 @@ let currentGalleryIndex = 0;
 
 function openGallery(preferredImageUrl = null) {
     dismissError();
-    SafeChromeWrapper.storage.local.get(['infographicStates'], (result) => {
+    // Fetch EVERYTHING to map separate images back to states
+    SafeChromeWrapper.storage.local.get(null, (result) => {
         const states = result.infographicStates || {};
 
-        // Filter items with image_url and sort by time (newest first)
-        // Keep older images even if status is not COMPLETED (e.g. during regeneration)
-        galleryImages = Object.values(states)
+        // Filter items (checking hasImage or image_url)
+        const allItems = Object.entries(states)
+            .map(([videoId, state]) => {
+                // Resolve Image URL: either it's still in state (old) or in separate key
+                let img = state.image_url;
+                if (!img && state.hasImage) {
+                    img = result[`img_${videoId}`];
+                }
+                return { ...state, image_url: img, videoId }; // Inject videoId for reference logic if needed
+            });
+
+        // Sort by time (newest first)
+        // Filter out items that still don't have an image (failed load or genuinely missing)
+        const validImages = allItems
             .filter(s => s.image_url)
             .sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0));
 
-        // REMOVED CHECK: if (galleryImages.length === 0) return; so we can show empty state
-
-        console.log("Opening Gallery. Images:", galleryImages); // DEBUG
-        if (galleryImages.length === 0) {
-            console.log("Gallery empty (no images with URLs)");
+        // Deduplicate by image_url
+        const uniqueMap = new Map();
+        for (const item of validImages) {
+            if (!uniqueMap.has(item.image_url)) {
+                uniqueMap.set(item.image_url, item);
+            }
         }
+        galleryImages = Array.from(uniqueMap.values());
+
+        console.log("Opening Gallery. Images:", galleryImages.length); // DEBUG
 
         // Find index of preferred image
         if (preferredImageUrl) {
@@ -1602,8 +1694,6 @@ function openGallery(preferredImageUrl = null) {
         } else {
             currentGalleryIndex = 0;
         }
-
-        console.log("Initial Gallery Index:", currentGalleryIndex); // DEBUG
 
         updateGalleryContent();
 
@@ -1628,20 +1718,51 @@ function handleImageError(failedUrl) {
     console.log("Image failed to load (expired/broken), removing:", failedUrl);
 
     // 1. Remove from chrome.storage.local
+    // 1. Remove from chrome.storage.local
     SafeChromeWrapper.storage.local.get(['infographicStates'], (result) => {
         const states = result.infographicStates || {};
         let modified = false;
+        let keysToRemove = [];
 
         // Find key(s) with this URL and delete
         for (const [key, state] of Object.entries(states)) {
-            if (state.image_url === failedUrl) {
-                delete states[key];
+            // Check logic needs to account for split storage. 
+            // In handleImageError context, we likely have the full resolved URL in array.
+            // If the URL matches what we resolved, we kill the state AND the img key.
+
+            // This is tricky because we don't have the key 'img_X' handy, we have the URL string.
+            // BUT, if we loaded it via openGallery, we injected 'videoId' into the object in validImages! 
+            // WAIT - 'galleryImages' are the objects from openGallery which I modified to include videoId!
+            // Let's rely on that or search blindly. 
+            // Actually, we can just search for the videoId in states.
+
+            // We'll iterate states. If 'hasImage' is true, we can't compare URL easily without fetching.
+            // But 'galleryImages' in memory has the mapped URL.
+
+            // Simplification: We remove from memory first (step 2 below), then we can use that item to find ID?
+            // Actually, let's just use the item from galleryImages if possible.
+        }
+
+        // Better approach: Find the item in 'galleryImages' first to get its Video ID (if I saved it there).
+        // In openGallery, I added: return { ...state, image_url: img, videoId };
+        // So yes, I have videoId.
+
+        const item = galleryImages.find(img => img.image_url === failedUrl);
+        if (item && item.videoId) {
+            const vid = item.videoId;
+            console.log(`Removing broken image state for ${vid}`);
+            if (states[vid]) {
+                delete states[vid];
+                keysToRemove.push(`img_${vid}`);
                 modified = true;
             }
         }
 
         if (modified) {
             SafeChromeWrapper.storage.local.set({ infographicStates: states });
+            for (const k of keysToRemove) {
+                SafeChromeWrapper.storage.local.remove(k);
+            }
         }
     });
 

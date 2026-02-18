@@ -21,11 +21,31 @@ chrome.runtime.onInstalled.addListener(async () => {
         }
     }
 
+    // 1.5 Migration: Move existing images to separate keys (once)
+    // We can do this every time or check a flag. Doing it every time is safer for now as it's fast if empty.
+    {
+        let migrationCount = 0;
+        for (const [videoId, state] of Object.entries(states)) {
+            // Check if it has a large image_url string (base64) that is NOT a separate key reference (though here we just move it)
+            // Actually, we just check if it exists in the state object.
+            if (state.image_url && state.image_url.startsWith('data:image')) {
+                console.log(`Migrating image for ${videoId}...`);
+                await chrome.storage.local.set({ [`img_${videoId}`]: state.image_url });
+
+                // Update state to remove big string
+                states[videoId] = { ...state, image_url: null, hasImage: true };
+                migrationCount++;
+                hasChanges = true;
+            }
+        }
+        if (migrationCount > 0) console.log(`Migrated ${migrationCount} images to separate storage.`);
+    }
+
     if (hasChanges) {
         await chrome.storage.local.set({ infographicStates: states });
     }
 
-    // 1.5 Clean Expired States (> 48 hours)
+    // 1.6 Clean Expired States (> 48 hours)
     await cleanExpiredStates();
 
     // 2. Clear Global Sticky ID if it was RUNNING
@@ -46,6 +66,9 @@ chrome.runtime.onInstalled.addListener(async () => {
             console.log(`Could not inject into tab ${tab.id}:`, e);
         }
     }
+
+    // 4. Setup CORS Rules
+    await setupCORSFix();
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -74,6 +97,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return true; // Keep channel open for async response
     } else if (message.type === 'GENERATE_QUEUE_INFOGRAPHIC') {
         runQueueGenerationFlow(message.queue)
+            .then(res => sendResponse(res))
+            .catch(err => sendResponse({ success: false, error: err.message }));
+        return true;
+    } else if (message.type === 'GENERATE_QUEUE_BATCH_SINGLE') {
+        runBatchQueueGenerationFlow(message.queue)
             .then(res => sendResponse(res))
             .catch(err => sendResponse({ success: false, error: err.message }));
         return true;
@@ -109,7 +137,7 @@ async function runGenerationFlow(url, title) {
         // 3. Add Source
         console.log("Adding Source...");
         const sourceData = await client.addSource(notebookId, url);
-        const sourceId = sourceData.source_id;
+        const sourceId = sourceData.source_ids[0];
         console.log("Source ID:", sourceId);
 
         // Wait a bit for ingestion
@@ -251,7 +279,7 @@ async function runQueueGenerationFlow(queue) {
 
                 console.log(`[Queue] Adding Source: ${item.url}`);
                 const sourceData = await client.addSource(notebookId, item.url);
-                const sourceId = sourceData.source_id;
+                const sourceId = sourceData.source_ids[0];
 
                 // Wait for ingestion
                 await new Promise(r => setTimeout(r, 5000));
@@ -349,6 +377,179 @@ async function runQueueGenerationFlow(queue) {
         await chrome.storage.local.set({ isQueueRunning: false });
         // We might not know which video failed if init failed, so broadcast global fail
         broadcastStatus(null, "FAILED", { error: e.message });
+        throw e;
+    }
+}
+
+async function runBatchQueueGenerationFlow(queue) {
+    if (!queue || queue.length === 0) return;
+
+    // Broadcast global RUNNING state
+    broadcastStatus(null, "RUNNING");
+
+    // SET GLOBAL QUEUE LOCK
+    await chrome.storage.local.set({ isQueueRunning: true });
+
+    const total = queue.length;
+    let collectedSourceIds = [];
+
+    try {
+        const client = new NotebookLMClient();
+        await client.init();
+
+        // 1. Create Notebook ONCE
+        const batchName = `Infographic Batch: ${new Date().toLocaleString()}`;
+        console.log(`[Batch] Creating Single Notebook: ${batchName}`);
+        const notebookId = await client.createNotebook(batchName);
+
+        // 2. COLLECT ALL URLS
+        const videoUrls = [];
+
+        for (let i = 0; i < total; i++) {
+            const item = queue[i];
+            const currentCount = i + 1;
+            const safeTitle = item.title || "Untitled Video";
+            const progressMsg = `Batch Processing: Preparing Source ${currentCount}/${total}...`;
+
+            console.log(`[Batch] Preparing source ${currentCount}/${total}: ${safeTitle}`);
+
+            // Update UI Message
+            await chrome.storage.local.set({
+                lastActiveVideoId: item.videoId,
+                queueStatusText: progressMsg
+            });
+
+            // Update individual state to RUNNING
+            await updateState(item.videoId, {
+                status: 'RUNNING',
+                operation_id: Date.now(),
+                title: safeTitle
+            });
+
+            // Broadcast progress
+            const tabs = await chrome.tabs.query({ url: "*://*.youtube.com/*" });
+            for (const tab of tabs) {
+                chrome.tabs.sendMessage(tab.id, {
+                    type: 'INFOGRAPHIC_UPDATE',
+                    status: 'RUNNING',
+                    queueProgress: `Preparing source ${currentCount} of ${total}`
+                }).catch(() => { });
+            }
+
+            videoUrls.push(item.url);
+        }
+
+        // 3. EXECUTE BATCH ADD SOURCE (ONE RPC CALL)
+        console.log(`[Batch] Executing Single RPC izAoDd for ${videoUrls.length} sources...`);
+        const batchProgressMsg = `Batch Processing: Adding all ${videoUrls.length} sources...`;
+        await chrome.storage.local.set({ queueStatusText: batchProgressMsg });
+
+        try {
+            const sourceData = await client.addSource(notebookId, videoUrls);
+            if (sourceData && sourceData.source_ids) {
+                // We might get IDs here, but we'll verify with getSources anyway to be safe
+                console.log(`[Batch] Immediate result IDs:`, sourceData.source_ids);
+                collectedSourceIds.push(...sourceData.source_ids);
+            }
+        } catch (addError) {
+            console.error("Batch Add Source Failed:", addError);
+        }
+
+        // Wait for ingestion of all items
+        console.log(`[Batch] Waiting for ingestion...`);
+        await new Promise(r => setTimeout(r, 5000));
+
+        // 4. GET ALL VALID SOURCE IDs (The definitive list)
+        const verifiedIds = await client.getSources(notebookId);
+        console.log(`[Batch] Verified ${verifiedIds.length} source IDs from notebook.`);
+
+        // Merge/Fallback Logic
+        if (verifiedIds.length > 0) {
+            collectedSourceIds = verifiedIds;
+        } else if (collectedSourceIds.length > 0) {
+            console.log(`[Batch] getSources returned 0, using ${collectedSourceIds.length} collected IDs as fallback.`);
+        }
+
+        // 3. GENERATE INFOGRAPHIC ONCE FOR ALL SOURCES
+        if (collectedSourceIds.length > 0) {
+            const progressMsg = `Generating Combined Infographic...`;
+            await chrome.storage.local.set({ queueStatusText: progressMsg });
+
+            // Broadcast generation phase
+            const tabs = await chrome.tabs.query({ url: "*://*.youtube.com/*" });
+            for (const tab of tabs) {
+                chrome.tabs.sendMessage(tab.id, {
+                    type: 'INFOGRAPHIC_UPDATE',
+                    status: 'RUNNING',
+                    queueProgress: `Generating Infographic...`
+                }).catch(() => { });
+            }
+
+            console.log(`[Batch] Running Tool for ${collectedSourceIds.length} sources...`);
+            const opId = await client.runInfographicTool(notebookId, collectedSourceIds); // Pass ARRAY
+
+            if (!opId) {
+                // If opId is null, it's virtually always a limit or quota issue
+                throw new Error("Daily limit exceeded");
+            }
+
+            console.log(`[Batch] Polling...`);
+            const imageUrl = await client.waitForInfographic(notebookId, opId);
+            console.log(`[Batch] Success! Converting...`);
+            const base64Image = await urlToBase64(imageUrl);
+
+            // 4. UPDATE ALL ITEMS WITH SUCCESS
+            for (let i = 0; i < total; i++) {
+                const item = queue[i];
+                // Only update if it wasn't already failed during addSource
+                // We'll trust our local state or just overwrite since it's "combined"
+                await updateState(item.videoId, {
+                    status: 'COMPLETED',
+                    image_url: base64Image,
+                    title: item.title
+                });
+
+                // UPDATE QUEUE OBJECT
+                const qResult = await chrome.storage.local.get(['infographicQueue']);
+                const currentQueue = qResult.infographicQueue || [];
+                const qItemIndex = currentQueue.findIndex(q => q.videoId === item.videoId);
+                if (qItemIndex !== -1) {
+                    currentQueue[qItemIndex].imageUrl = base64Image;
+                    currentQueue[qItemIndex].status = 'COMPLETED';
+                    await chrome.storage.local.set({ infographicQueue: currentQueue });
+                }
+
+                broadcastStatus(item.url, "COMPLETED", { image_url: base64Image });
+            }
+
+        } else {
+            throw new Error("No sources were successfully added.");
+        }
+
+        // UNLOCK GLOBAL QUEUE
+        await chrome.storage.local.set({ isQueueRunning: false });
+        return { success: true };
+
+    } catch (e) {
+        console.error("Queue Batch Flow Fatal Error:", e);
+        await chrome.storage.local.set({ isQueueRunning: false });
+
+        const friendly = getUserFriendlyError(e.message);
+
+        if (friendly.type === 'LIMIT') {
+            // Loop through all queue items and mark them as LIMIT_EXCEEDED
+            // so the UI reflects "Limit Reached" for all involved locally if possible,
+            // although batch flow doesn't iterate individually on failure easily here.
+            // But we can update the global status.
+
+            for (const item of queue) {
+                await updateState(item.videoId, { status: 'LIMIT_EXCEEDED', error: friendly.message });
+            }
+
+            broadcastStatus(null, "LIMIT_EXCEEDED", { error: friendly.message });
+        } else {
+            broadcastStatus(null, "FAILED", { error: e.message });
+        }
         throw e;
     }
 }
@@ -542,27 +743,67 @@ class NotebookLMClient {
         return notebookId;
     }
 
-    async addSource(notebookId, url) {
+    async addSource(notebookId, urls) {
         // RPC: izAoDd
-        const sourcePayload = [null, null, null, null, null, null, null, [url], null, null, 1];
-        const payload = [[sourcePayload], notebookId, [2], [1, null, null, null, null, null, null, null, null, null, [1]]];
+        // Check if urls is array, if not wrap it
+        const urlArray = Array.isArray(urls) ? urls : [urls];
+        const allSourceIds = [];
 
-        const resp = await this.executeRpc("izAoDd", payload);
+        console.log(`[Batch] internal addSource called with ${urlArray.length} URLs. processing sequentially...`);
 
-        // Extract Source ID
-        let sourceId = this.findUuid(resp);
+        for (const url of urlArray) {
+            try {
+                // Construct payload for SINGLE URL
+                // sourcePayload = [null, null, null, null, null, null, null, [url], null, null, 1]
+                const sourcePayload = [null, null, null, null, null, null, null, [url], null, null, 1];
+                const payload = [[sourcePayload], notebookId, [2], [1, null, null, null, null, null, null, null, null, null, [1]]];
 
-        if (!sourceId) {
-            // Poll for async source (YouTube)
-            // Simplified: Wait 5s and check notebook sources
-            await new Promise(r => setTimeout(r, 4000));
-            const sources = await this.getSources(notebookId);
-            if (sources.length > 0) sourceId = sources[0];
+                const resp = await this.executeRpc("izAoDd", payload);
+
+                // Extract Source ID (Single)
+                let sourceId = this.findUuid(resp);
+
+                if (sourceId) {
+                    allSourceIds.push(sourceId);
+                } else {
+                    console.warn(`[Batch] No ID returned for URL: ${url}`);
+                }
+
+                // Small delay to prevent rate limits
+                if (urlArray.length > 1) await new Promise(r => setTimeout(r, 1000));
+
+            } catch (e) {
+                console.error(`[Batch] Failed to add specific source ${url}`, e);
+            }
         }
 
-        if (!sourceId) throw new Error("Failed to add source");
+        // Verification: If we sent N urls, we hope for N IDs (cleaned)
+        console.log(`[Batch] addSource finished. collected ${allSourceIds.length} IDs for ${urlArray.length} URLs.`);
 
-        return { source_id: sourceId };
+        return { source_ids: allSourceIds };
+    }
+
+    // Helper to find UUID (Original) - kept for single lookup
+    findUuid(obj) {
+        if (typeof obj === 'string') {
+            if (obj.length === 36 && (obj.match(/-/g) || []).length === 4) return obj;
+            if (obj.startsWith('[') || obj.startsWith('{')) {
+                try { return this.findUuid(JSON.parse(obj)); } catch (e) { }
+            }
+        }
+        if (Array.isArray(obj)) {
+            for (const item of obj) {
+                const res = this.findUuid(item);
+                if (res) return res;
+            }
+        }
+        if (typeof obj === 'object' && obj !== null) {
+            for (const val of Object.values(obj)) {
+                const res = this.findUuid(val);
+                if (res) return res;
+            }
+        }
+        return null;
     }
 
     async getSources(notebookId) {
@@ -580,20 +821,62 @@ class NotebookLMClient {
     }
 
     async runInfographicTool(notebookId, sourceId) {
+        console.log(`[Batch] runInfographicTool called with:`, sourceId);
+
+        // Construct Tool Payload
+        // We need to tell it which sources to use.
+        // Format seems to be: [[[sourceId1, sourceId2, ...]]]
+        // NOT [[sourceId1], [sourceId2]] which means multiple separate executions?
+
+        let sourceParam;
+        if (Array.isArray(sourceId)) {
+            // HAR Analysis:
+            // The structure is [[["id1"]], [["id2"]]]
+            // So each ID needs to be wrapped in [[ ]]
+            // And the whole list is the param.
+
+            sourceParam = sourceId.map(id => [[id]]);
+
+        } else {
+            // Single ID
+            sourceParam = [[[sourceId]]];
+        }
+
         // RPC: R7cb6c
-        // 7 = Infographic
-        // Payload struct: [2], nbId, [ ... ]
-        // Using simplified sturdy payload from python client
-        const sourceParam = [[[sourceId]]];
+        // Based on HAR: [header, notebookId, toolPayload]
+
+        // Header from HAR: [2, null, null, [1, null, null, null, null, null, null, null, null, null, [1]], [[1]]]
+        const header = [2, null, null, [1, null, null, null, null, null, null, null, null, null, [1]], [[1]]];
+
+        // Tool Payload from code (seems fine, just needs to be 3rd arg)
         const toolPayload = [null, null, 7, sourceParam, null, null, null, null, null, null, null, null, null, null, [[null, null, null, 1, 2]]];
-        const payload = [[2], notebookId, toolPayload];
+
+        // Correct Payload: [Header, NotebookID, ToolPayload]
+        const payload = [header, notebookId, toolPayload];
+
+        console.log(`[Batch] Sending Infographic RPC payload:`, JSON.stringify(payload).substring(0, 500));
 
         const resp = await this.executeRpc("R7cb6c", payload);
 
-        if (Array.isArray(resp) && resp.length > 0 && Array.isArray(resp[0])) {
-            return resp[0][0]; // Operation ID
+        // Response usually contains operation ID or direct result
+        // We need to parse it. 
+        // Based on logs, we get an operation ID usually?
+        // Actually, let's look at what we get.
+
+        let opId = null;
+        if (Array.isArray(resp) && resp.length > 0) {
+            // Try to find an operation ID pattern (uuid?)
+            opId = this.findUuid(resp);
         }
-        return null; // Might be silent success or failure
+
+        if (!opId) {
+            // If no OpID, it is likely a limit issue or a failure.
+            // We should not "Force Poll" anymore.
+            console.warn("[Batch] No OpID found in tool response. Treating as failure/limit.");
+            return null;
+        }
+
+        return opId;
     }
 
     async waitForInfographic(notebookId, opId) {
@@ -652,8 +935,12 @@ async function broadcastStatus(url, status, payload = {}) {
         const videoId = extractVideoId(url);
         const allTabs = await chrome.tabs.query({ url: "*://*.youtube.com/*" });
         for (const tab of allTabs) {
+            let msgType = "INFOGRAPHIC_UPDATE";
+            if (status === "AUTH_EXPIRED") msgType = "AUTH_EXPIRED";
+            if (status === "LIMIT_EXCEEDED") msgType = "LIMIT_EXCEEDED";
+
             chrome.tabs.sendMessage(tab.id, {
-                type: status === "AUTH_EXPIRED" ? "AUTH_EXPIRED" : "INFOGRAPHIC_UPDATE",
+                type: msgType,
                 videoId: videoId,
                 status: status,
                 ...payload
@@ -664,6 +951,15 @@ async function broadcastStatus(url, status, payload = {}) {
 
 async function updateState(videoId, newState) {
     if (!videoId) return;
+
+    // Intercept image_url to store separately
+    let imageToStore = null;
+    if (newState.image_url && newState.image_url.startsWith('data:image')) {
+        imageToStore = newState.image_url;
+        newState.image_url = null; // Don't put big string in main state
+        newState.hasImage = true;
+    }
+
     const result = await chrome.storage.local.get(['infographicStates']);
     const states = result.infographicStates || {};
 
@@ -672,9 +968,16 @@ async function updateState(videoId, newState) {
         newState.completedAt = Date.now();
     }
 
-    // Merge existing state with new state to preserve fields like title
+    // Merge existing state
     states[videoId] = { ...(states[videoId] || {}), ...newState };
+
+    // Save state
     await chrome.storage.local.set({ infographicStates: states });
+
+    // Save image if present
+    if (imageToStore) {
+        await chrome.storage.local.set({ [`img_${videoId}`]: imageToStore });
+    }
 }
 
 async function cleanExpiredStates() {
@@ -689,6 +992,10 @@ async function cleanExpiredStates() {
         if (state.completedAt && (Date.now() - state.completedAt > EXPIRATION_MS)) {
             console.log(`Removing expired infographic: ${videoId} (Age: ${((Date.now() - state.completedAt) / 3600000).toFixed(1)} hrs)`);
             delete states[videoId];
+
+            // Also remove the separate image key
+            await chrome.storage.local.remove(`img_${videoId}`);
+
             hasChanges = true;
         }
         // Fallback for older items without timestamp? 
@@ -706,7 +1013,9 @@ async function cleanExpiredStates() {
 // --- IMAGE HELPER ---
 async function urlToBase64(url) {
     try {
-        const response = await fetch(url);
+        // We MUST include credentials to avoid redirect to login page for private content
+        // But this triggers CORS error on wildcard '*' unless we rewrite headers (declarativeNetRequest)
+        const response = await fetch(url, { credentials: 'include' });
         const blob = await response.blob();
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
@@ -718,4 +1027,32 @@ async function urlToBase64(url) {
         console.error("Failed to convert image to base64:", e);
         return url; // Fallback to original URL if fetch fails
     }
+}
+
+async function setupCORSFix() {
+    // Dynamic Rule to fix Google CDN CORS for authenticated requests
+    // We remove the wildcard '*' and replace it with our extension origin, 
+    // and explicitly allow credentials.
+    const ruleId = 1;
+    const extensionOrigin = `chrome-extension://${chrome.runtime.id}`;
+
+    await chrome.declarativeNetRequest.updateDynamicRules({
+        removeRuleIds: [ruleId],
+        addRules: [{
+            "id": ruleId,
+            "priority": 1,
+            "action": {
+                "type": "modifyHeaders",
+                "responseHeaders": [
+                    { "header": "access-control-allow-origin", "operation": "set", "value": extensionOrigin },
+                    { "header": "access-control-allow-credentials", "operation": "set", "value": "true" }
+                ]
+            },
+            "condition": {
+                "urlFilter": "googleusercontent.com",
+                "resourceTypes": ["xmlhttprequest"]
+            }
+        }]
+    });
+    console.log("CORS Fix Rules Applied");
 }
