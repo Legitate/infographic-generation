@@ -889,7 +889,7 @@ function getOrCreateUI() {
         const genQueueBtn = document.createElement('button');
         genQueueBtn.id = UI_CONTAINER_ID + '-queue-gen-btn';
         genQueueBtn.className = 'altrosyn-btn';
-        genQueueBtn.textContent = 'Generate All';
+        genQueueBtn.textContent = 'Generate Separately';
         genQueueBtn.style.fontSize = '12px';
         genQueueBtn.onclick = startQueueGeneration;
 
@@ -1390,7 +1390,7 @@ function updateQueueUI(currentStatus = 'IDLE') {
                         }
                     } else {
                         genBtn.disabled = false;
-                        genBtn.textContent = 'Generate All';
+                        genBtn.textContent = 'Generate Separately';
                         genBtn.style.opacity = '1';
                         genBtn.style.cursor = 'pointer';
                         if (genBatchBtn) {
