@@ -176,7 +176,7 @@ function injectStyles() {
             /* Variables now handled via class or override below if needed */
         }
         /* Dark Theme Overrides */
-        body.altrosyn-dark-theme, #${UI_CONTAINER_ID}.dark-mode {
+        body.altrosyn-dark-theme, #${UI_CONTAINER_ID}.dark-mode, #altrosyn-gallery-overlay.dark-mode {
             --altrosyn-bg-color: rgba(20, 20, 20, 0.85);
             --altrosyn-bg-minimized: rgba(30, 30, 30, 0.9);
             --altrosyn-text-main: #f3f4f6;
@@ -676,12 +676,12 @@ function injectStyles() {
         }
         .altrosyn-gallery-prev { left: 24px; }
         .altrosyn-gallery-next { right: 24px; }
-        #${UI_CONTAINER_ID}.dark-mode .altrosyn-gallery-nav-btn {
+        #altrosyn-gallery-overlay.dark-mode .altrosyn-gallery-nav-btn {
             background: rgba(40, 40, 40, 0.8);
             color: #fff;
             border-color: rgba(255,255,255,0.1);
         }
-        #${UI_CONTAINER_ID}.dark-mode .altrosyn-gallery-nav-btn:hover {
+        #altrosyn-gallery-overlay.dark-mode .altrosyn-gallery-nav-btn:hover {
             background: rgba(50, 50, 50, 1);
         }
 
@@ -797,6 +797,12 @@ function getOrCreateUI() {
                 container.classList.toggle('dark-mode');
                 const isDark = container.classList.contains('dark-mode');
                 SafeChromeWrapper.storage.local.set({ theme: isDark ? 'dark' : 'light' });
+
+                const galleryOverlay = document.getElementById('altrosyn-gallery-overlay');
+                if (galleryOverlay) {
+                    if (isDark) galleryOverlay.classList.add('dark-mode');
+                    else galleryOverlay.classList.remove('dark-mode');
+                }
             };
         }
 
@@ -994,6 +1000,7 @@ function getOrCreateUI() {
             }
             if (result.theme === 'dark') {
                 container.classList.add('dark-mode');
+                galleryOverlay.classList.add('dark-mode');
             }
         });
     }
